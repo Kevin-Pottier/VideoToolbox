@@ -36,6 +36,17 @@ pip install -r requirements.txt
 - Only `.py`, `.gitignore`, and `README.Md` are tracked by git (see `.gitignore`).
 - All other files (videos, batch files, outputs) are ignored by git.
 
+## Making an .exe out of this code
+You can have a .exe out of this script to make it easier to access and share to your friends. 
+1. To do so, you first need to install `pyinstaller`
+```bash 
+pip install pyinstaller
+```
+2. You can just run the following command: 
+```bash 
+pyinstaller --onefile CompressMovie.py
+```
+
 ## Troubleshooting
 
 - Only third-party packages (like `colorama`) are listed in `requirements.txt`. Standard Python libraries such as `os`, `subprocess`, and `tkinter` are included with every Python installation and do not need to be installed separately. If you encounter errors about missing standard libraries, your Python installation may be broken—reinstall Python from the official website to fix this.
