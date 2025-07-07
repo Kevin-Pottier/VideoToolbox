@@ -11,15 +11,23 @@ def run_subtitle_translation():
     root = tk.Tk()
     root.title("Subtitle Translation")
     root.geometry("350x200")
+    root.attributes('-topmost', True)
     subfile_path = tk.StringVar()
     def browse():
+        # Always on top for file dialog
+        root.lift()
+        root.attributes('-topmost', True)
         subfile_path.set(filedialog.askopenfilename(title="Choose subtitle file", filetypes=[("Subtitles", "*.srt *.ass")]))
     tk.Label(root, text="Choose subtitle file to translate:").pack(pady=10)
     tk.Button(root, text="Browse Subtitles", width=20, command=browse).pack(pady=5)
     tk.Label(root, textvariable=subfile_path).pack(pady=5)
     def ok():
         if not subfile_path.get():
-            messagebox.showerror("File Error", "No subtitle file selected.")
+            msg_root = tk.Tk()
+            msg_root.attributes('-topmost', True)
+            msg_root.withdraw()
+            messagebox.showerror("File Error", "No subtitle file selected.", parent=msg_root)
+            msg_root.destroy()
             return
 
         print(Fore.GREEN + f"Selected subtitle file for translation: {subfile_path.get()}" + Style.RESET_ALL)

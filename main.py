@@ -12,6 +12,7 @@ def choose_usage_dialog():
     root = tk.Tk()
     root.title("Choose Usage")
     root.geometry("300x200")
+    root.attributes('-topmost', True)
     tk.Label(root, text="Choose how to use this script:").pack(pady=10)
     tk.Button(root, text="Film Compression", width=20, command=lambda: set_usage("film_compression")).pack(pady=5)
     tk.Button(root, text="Subtitle Translation", width=20, command=lambda: set_usage("sub_translation")).pack(pady=5)

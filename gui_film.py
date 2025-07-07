@@ -10,16 +10,22 @@ def run_film_compression():
     while not file_path:
         root = tk.Tk()
         root.withdraw()
+        root.attributes('-topmost', True)
         file_path = filedialog.askopenfilename(title="Choose a video file", filetypes=[("Videos", "*.mp4 *.mkv *.avi")])
         root.destroy()
         if not file_path:
-            messagebox.showerror("File Error", "No video file selected. Please choose a video file.")
+            msg_root = tk.Tk()
+            msg_root.attributes('-topmost', True)
+            msg_root.withdraw()
+            messagebox.showerror("File Error", "No video file selected. Please choose a video file.", parent=msg_root)
+            msg_root.destroy()
 
     # Step 2: Subtitle options
     sub_option = None
     sub_file = None
     while sub_option is None or (sub_option in ("soft", "hard") and not sub_file):
         sub_root = tk.Tk()
+        sub_root.attributes('-topmost', True)
         sub_option_var = tk.StringVar(value="none")
         sub_file_var = tk.StringVar(value="")
         sub_root.title("Subtitle Options")
@@ -47,11 +53,16 @@ def run_film_compression():
         sub_file = sub_file_var.get() if sub_file_var.get() else None
         sub_root.destroy()
         if sub_option in ("soft", "hard") and not sub_file:
-            messagebox.showerror("Subtitle Error", "You selected a subtitle option but did not choose a subtitle file. Please choose a subtitle file.")
+            msg_root = tk.Tk()
+            msg_root.attributes('-topmost', True)
+            msg_root.withdraw()
+            messagebox.showerror("Subtitle Error", "You selected a subtitle option but did not choose a subtitle file. Please choose a subtitle file.", parent=msg_root)
+            msg_root.destroy()
 
     # Step 3: Output container
     container_root = tk.Tk()
     container_root.withdraw()
+    container_root.attributes('-topmost', True)
     container_choice = tk.StringVar(value="mp4")
     def set_choice(val):
         container_choice.set(val)
@@ -59,6 +70,7 @@ def run_film_compression():
     container_win = tk.Toplevel(container_root)
     container_win.title("Choose Output Container")
     container_win.geometry("300x150")
+    container_win.attributes('-topmost', True)
     tk.Label(container_win, text="Choose the output container:").pack(pady=10)
     tk.Button(container_win, text="MP4", width=15, command=lambda: set_choice("mp4")).pack(pady=5)
     tk.Button(container_win, text="MKV", width=15, command=lambda: set_choice("mkv")).pack(pady=5)
@@ -75,13 +87,18 @@ def run_film_compression():
     while max_size_gb is None or max_size_gb <= 0:
         root = tk.Tk()
         root.withdraw()
+        root.attributes('-topmost', True)
         try:
             max_size_gb = float(simpledialog.askstring("Target Video Size", "Enter the maximum file size in GB:", parent=root))
         except Exception:
             max_size_gb = None
         root.destroy()
         if not max_size_gb or max_size_gb <= 0:
-            messagebox.showerror("Size Error", "Invalid size. Must be greater than 0.")
+            msg_root = tk.Tk()
+            msg_root.attributes('-topmost', True)
+            msg_root.withdraw()
+            messagebox.showerror("Size Error", "Invalid size. Must be greater than 0.", parent=msg_root)
+            msg_root.destroy()
 
     # Step 5: Run compression logic
     run_compression(file_path, sub_option, sub_file, ext, max_size_gb)
