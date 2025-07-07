@@ -1,6 +1,27 @@
-*
+# .gitignore Documentation
+
+# Ignore the CompressMovie.py script file.
+# Ignore all video files with .mp4 and .mkv extensions.
+# Ignore all subtitle files with .srt extension.
+# Ignore build output and distribution directories.
+# Ignore Python cache and compiled files: __pycache__/, *.pyc, *.pyo.
+# Ignore log files (*.log) and macOS system files (*.DS_Store).
+# Do NOT ignore the .gitignore file itself, README.Md, and requirements.txt (these are explicitly included).
 CompressMovie.py
-!*.py
+
+*.mp4
+*.mkv
+
+*.srt
+
+dist/
+build/
+__pycache__/
+*.pyc
+*.pyo
+*.log
+*.DS_Store
+
 !.gitignore
 !README.Md
 !requirements.txt
