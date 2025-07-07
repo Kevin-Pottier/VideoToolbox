@@ -2,6 +2,9 @@ import tkinter as tk
 from tkinter import filedialog, messagebox
 from colorama import Fore, Style
 import os
+import pysrt
+from deep_translator import GoogleTranslator
+
 
 def run_subtitle_translation():
     root = tk.Tk()
@@ -17,7 +20,28 @@ def run_subtitle_translation():
         if not subfile_path.get():
             messagebox.showerror("File Error", "No subtitle file selected.")
             return
+        
         print(Fore.GREEN + f"Selected subtitle file for translation: {subfile_path.get()}" + Style.RESET_ALL)
+        
+        subs = pysrt.open(subfile_path.get(), encoding='utf-8')
+        translator = GoogleTranslator(source='en', target='fr')
+        total = len(subs)
+
+        # Simple progress bar in command prompt
+        for idx, sub in enumerate(subs, 1):
+            try:
+                sub.text = translator.translate(sub.text)
+            except Exception as e:
+                print(Fore.RED + f"Error translating subtitle '{sub.text}': {e}" + Style.RESET_ALL)
+            # Progress bar
+            progress = int(40 * idx / total)
+            bar = '[' + '#' * progress + '-' * (40 - progress) + ']'
+            print(f"\rTranslating: {bar} {idx}/{total}", end='', flush=True)
+        print()  # Newline after progress bar
+
+        subs.save(f"{os.path.splitext(subfile_path.get())[0]}_translated.srt", encoding='utf-8')
+        print(Fore.GREEN + "Translation completed. Output saved as _translated.srt" + Style.RESET_ALL)
+
         root.quit()
     tk.Button(root, text="OK", command=ok).pack(pady=10)
     root.mainloop()
