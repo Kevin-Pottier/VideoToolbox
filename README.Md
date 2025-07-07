@@ -17,13 +17,18 @@
   - Shows the FFmpeg command used
 - For Subtitle Translation:
   - Select a subtitle file to translate via a dialog
-  - (Translation logic placeholder: currently just prints the selected file)
+  - Translates all subtitle lines from English to French using Google Translate (deep-translator)
+  - Fast translation using parallel requests (multi-threaded)
+  - Shows a real-time progress bar in the command line during translation
+  - Saves the translated subtitle as a new file with `_translated.srt` suffix
 
 ## Requirements
 - Python 3
 - FFmpeg and FFprobe installed and available in your system PATH
-- Python packages listed in `requirements.txt`
-- `colorama` (optional, for colored terminal output)
+- Python packages listed in `requirements.txt`:
+  - `colorama` (for colored terminal output)
+  - `pysrt` (for reading/writing subtitle files)
+  - `deep-translator` (for Google Translate API)
 
 All required Python packages can be installed with:
 
@@ -36,7 +41,7 @@ pip install -r requirements.txt
    `python main.py`
 2. Choose the usage mode:
    - **Film Compression**: Compress a video file with optional subtitles.
-   - **Subtitle Translation**: Select a subtitle file for translation (feature placeholder).
+   - **Subtitle Translation**: Select a subtitle file for translation (English to French, with progress bar).
 3. Follow the dialogs for your chosen mode:
    - For Film Compression:
      - Select a video file.
@@ -46,7 +51,10 @@ pip install -r requirements.txt
      - The script will extract video/audio metadata, calculate the required video bitrate, and run FFmpeg to compress the video.
      - The output video will be created in the same folder as the original.
    - For Subtitle Translation:
-     - Select a subtitle file. (Translation logic not yet implemented.)
+     - Select a subtitle file (`.srt` or `.ass`).
+     - The script will translate all lines from English to French using Google Translate (deep-translator).
+     - A real-time progress bar will be shown in the command line.
+     - The translated subtitle will be saved as a new file with `_translated.srt` appended to the name.
 
 - Only `.py`, `.gitignore`, `README.Md`, and `requirements.txt` are tracked by git (see `.gitignore`).
 - All other files (videos, batch files, outputs, and the old `CompressMovie.py`) are ignored by git.
@@ -58,9 +66,20 @@ You can have a .exe out of this script to make it easier to access and share to 
 pip install pyinstaller
 ```
 2. You can just run the following command: 
-```bash 
+```bash
 pyinstaller --onefile CompressMovie.py
 ```
+
+## Changelog
+
+### July 2025
+- Subtitle translation workflow now fully implemented:
+  - Uses Google Translate (deep-translator) to translate all lines from English to French.
+  - Fast, multi-threaded translation for speed.
+  - Real-time progress bar in the command line.
+  - Output saved as `_translated.srt`.
+- Requirements updated: now uses `colorama`, `pysrt`, and `deep-translator`.
+- `.gitignore` and documentation updated to reflect new modular structure and ignored files.
 
 ## Troubleshooting
 
