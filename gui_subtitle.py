@@ -4,6 +4,7 @@ from colorama import Fore, Style
 import os
 import pysrt
 from deep_translator import GoogleTranslator
+import concurrent.futures
 
 
 def run_subtitle_translation():
@@ -20,28 +21,44 @@ def run_subtitle_translation():
         if not subfile_path.get():
             messagebox.showerror("File Error", "No subtitle file selected.")
             return
-        
+
         print(Fore.GREEN + f"Selected subtitle file for translation: {subfile_path.get()}" + Style.RESET_ALL)
-        
         subs = pysrt.open(subfile_path.get(), encoding='utf-8')
         translator = GoogleTranslator(source='en', target='fr')
         total = len(subs)
 
-        # Simple progress bar in command prompt
-        for idx, sub in enumerate(subs, 1):
+        # Console progress bar setup
+        import sys
+        def print_progress(count, total, bar_len=40):
+            filled_len = int(round(bar_len * count / float(total)))
+            bar = '=' * filled_len + '-' * (bar_len - filled_len)
+            percent = round(100.0 * count / float(total), 1)
+            sys.stdout.write(f'\rTranslating: [{bar}] {percent}% ({count}/{total})')
+            sys.stdout.flush()
+            if count == total:
+                print()
+
+        results = [None] * total
+
+        def translate_and_update(idx, text):
             try:
-                sub.text = translator.translate(sub.text)
+                translated = translator.translate(text)
             except Exception as e:
-                print(Fore.RED + f"Error translating subtitle '{sub.text}': {e}" + Style.RESET_ALL)
-            # Progress bar
-            progress = int(40 * idx / total)
-            bar = '[' + '#' * progress + '-' * (40 - progress) + ']'
-            print(f"\rTranslating: {bar} {idx}/{total}", end='', flush=True)
-        print()  # Newline after progress bar
+                print(Fore.RED + f"Error translating: {e}" + Style.RESET_ALL)
+                translated = text
+            results[idx] = translated
+            print_progress(sum(r is not None for r in results), total)
 
+        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
+            futures = [executor.submit(translate_and_update, idx, sub.text) for idx, sub in enumerate(subs)]
+            concurrent.futures.wait(futures)
+
+        # Assign translated text back
+        for sub, translated in zip(subs, results):
+            sub.text = translated
+
+        print(Fore.GREEN + "\nTranslation completed. Output saved as _translated.srt" + Style.RESET_ALL)
         subs.save(f"{os.path.splitext(subfile_path.get())[0]}_translated.srt", encoding='utf-8')
-        print(Fore.GREEN + "Translation completed. Output saved as _translated.srt" + Style.RESET_ALL)
-
         root.quit()
     tk.Button(root, text="OK", command=ok).pack(pady=10)
     root.mainloop()
