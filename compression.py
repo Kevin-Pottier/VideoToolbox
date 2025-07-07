@@ -4,6 +4,10 @@ from utils import ffprobe
 import subprocess
 
 def run_compression(file_path, sub_option, sub_file, ext, max_size_gb):
+    def ffmpeg_escape(path):
+        # Use forward slashes and escape special chars for FFmpeg
+        return os.path.abspath(path).replace("\\", "/").replace(":", "\\:")
+
     # Metadata extraction
     duration_str = ffprobe([
         "ffprobe", "-v", "error", "-show_entries",
@@ -49,35 +53,41 @@ def run_compression(file_path, sub_option, sub_file, ext, max_size_gb):
     output_file = os.path.splitext(file_path)[0] + f"_compressed.{ext}"
 
     # Build ffmpeg command
+    video_dir = os.path.dirname(file_path)
+    video_name = os.path.basename(file_path)
+    output_name = os.path.basename(output_file)
+    # For subtitles, use only the filename and set cwd to video_dir
     if sub_option == "soft":
-        rel_sub_file = os.path.relpath(sub_file, start=os.path.dirname(file_path))
+        sub_filename = os.path.basename(sub_file) if sub_file else None
         ffmpeg_cmd = [
-            "ffmpeg", "-i", file_path,
-            "-i", rel_sub_file,
+            "ffmpeg", "-i", video_name,
+            "-i", sub_filename,
             "-c:s", "mov_text",
             "-map", "0:v", "-map", "0:a", "-map", "1:s",
             "-c:v", "libx264", "-b:v", f"{video_bitrate_kbps}k",
             "-preset", "medium", "-c:a", "aac", "-b:a", "192k",
-            "-movflags", "+faststart"
+            "-movflags", "+faststart",
+            output_name, "-y"
         ]
     else:
         ffmpeg_cmd = [
-            "ffmpeg", "-i", file_path,
+            "ffmpeg", "-i", video_name,
             "-c:v", "libx264", "-b:v", f"{video_bitrate_kbps}k",
             "-preset", "medium", "-c:a", "aac", "-b:a", "192k",
             "-movflags", "+faststart"
         ]
         if sub_option == "hard" and sub_file:
-            rel_sub_file = os.path.relpath(sub_file, start=os.path.dirname(file_path)).replace("\\", "/")
-            ffmpeg_cmd += ["-vf", f"subtitles={rel_sub_file}"]
-
-    ffmpeg_cmd += [output_file, "-y"]
+            sub_filename = os.path.basename(sub_file)
+            # Always use forward slashes for ffmpeg filter
+            ffmpeg_cmd += ["-vf", f"subtitles={sub_filename.replace('\\', '/')}" ]
+        ffmpeg_cmd += [output_name, "-y"]
 
     print(Fore.YELLOW + f"\nRunning ffmpeg with subtitles option: {sub_option}\n\n" + Style.RESET_ALL)
     print("\tCommand:", " ".join(ffmpeg_cmd))
     print()
 
-    ret = subprocess.call(ffmpeg_cmd)
+    # Run ffmpeg in the video's directory so all relative paths work
+    ret = subprocess.call(ffmpeg_cmd, cwd=video_dir)
 
     if ret == 0:
         print(Fore.GREEN + f"\n✅ Compression finished. Output: {output_file}" + Style.RESET_ALL)
