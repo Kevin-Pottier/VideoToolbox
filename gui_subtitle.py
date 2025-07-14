@@ -14,84 +14,23 @@ def run_subtitle_translation():
     root.attributes('-topmost', True)
     subfile_path = tk.StringVar()
 
+
     # Language codes for FFmpeg and Google Translate
     LANGUAGES = [
-        ("English", "en"),
-        ("French", "fr"),
-        ("German", "de"),
-        ("Spanish", "es"),
-        ("Italian", "it"),
-        ("Portuguese", "pt"),
-        ("Russian", "ru"),
-        ("Chinese", "zh-cn"),
-        ("Japanese", "ja"),
-        ("Korean", "ko"),
-        ("Arabic", "ar"),
-        ("Dutch", "nl"),
-        ("Greek", "el"),
-        ("Turkish", "tr"),
-        ("Polish", "pl"),
-        ("Czech", "cs"),
-        ("Hungarian", "hu"),
-        ("Romanian", "ro"),
-        ("Bulgarian", "bg"),
-        ("Ukrainian", "uk"),
-        ("Serbian", "sr"),
-        ("Croatian", "hr"),
-        ("Slovak", "sk"),
-        ("Swedish", "sv"),
-        ("Finnish", "fi"),
-        ("Danish", "da"),
-        ("Norwegian", "no"),
-        ("Hebrew", "he"),
-        ("Hindi", "hi"),
-        ("Vietnamese", "vi"),
-        ("Indonesian", "id"),
-        ("Malay", "ms"),
-        ("Thai", "th"),
-        ("Filipino", "tl"),
-        ("Persian", "fa"),
-        ("Urdu", "ur"),
-        ("Bengali", "bn"),
-        ("Slovenian", "sl"),
-        ("Estonian", "et"),
-        ("Latvian", "lv"),
-        ("Lithuanian", "lt"),
-        ("Georgian", "ka"),
-        ("Armenian", "hy"),
-        ("Azerbaijani", "az"),
-        ("Albanian", "sq"),
-        ("Macedonian", "mk"),
-        ("Basque", "eu"),
-        ("Catalan", "ca"),
-        ("Galician", "gl"),
-        ("Welsh", "cy"),
-        ("Irish", "ga"),
-        ("Scottish Gaelic", "gd"),
-        ("Icelandic", "is"),
-        ("Maltese", "mt"),
-        ("Swahili", "sw"),
-        ("Afrikaans", "af"),
-        ("Zulu", "zu"),
-        ("Xhosa", "xh"),
-        ("Sesotho", "st"),
-        ("Yoruba", "yo"),
-        ("Igbo", "ig"),
-        ("Hausa", "ha"),
-        ("Somali", "so"),
-        ("Amharic", "am"),
-        ("Tigrinya", "ti"),
-        ("Oromo", "om"),
-        ("Kinyarwanda", "rw"),
-        ("Kirundi", "rn"),
-        ("Lingala", "ln"),
-        ("Luganda", "lg"),
-        ("Shona", "sn"),
-        ("Sesotho sa Leboa", "nso"),
-        ("Tswana", "tn"),
-        ("Tsonga", "ts"),
-        ("Venda", "ve"),
-        ("Xitsonga", "xh"),
+        ("English", "en"), ("French", "fr"), ("German", "de"), ("Spanish", "es"), ("Italian", "it"),
+        ("Portuguese", "pt"), ("Russian", "ru"), ("Chinese", "zh-cn"), ("Japanese", "ja"), ("Korean", "ko"),
+        ("Arabic", "ar"), ("Dutch", "nl"), ("Greek", "el"), ("Turkish", "tr"), ("Polish", "pl"), ("Czech", "cs"),
+        ("Hungarian", "hu"), ("Romanian", "ro"), ("Bulgarian", "bg"), ("Ukrainian", "uk"), ("Serbian", "sr"),
+        ("Croatian", "hr"), ("Slovak", "sk"), ("Swedish", "sv"), ("Finnish", "fi"), ("Danish", "da"), ("Norwegian", "no"),
+        ("Hebrew", "he"), ("Hindi", "hi"), ("Vietnamese", "vi"), ("Indonesian", "id"), ("Malay", "ms"), ("Thai", "th"),
+        ("Filipino", "tl"), ("Persian", "fa"), ("Urdu", "ur"), ("Bengali", "bn"), ("Slovenian", "sl"), ("Estonian", "et"),
+        ("Latvian", "lv"), ("Lithuanian", "lt"), ("Georgian", "ka"), ("Armenian", "hy"), ("Azerbaijani", "az"),
+        ("Albanian", "sq"), ("Macedonian", "mk"), ("Basque", "eu"), ("Catalan", "ca"), ("Galician", "gl"), ("Welsh", "cy"),
+        ("Irish", "ga"), ("Scottish Gaelic", "gd"), ("Icelandic", "is"), ("Maltese", "mt"), ("Swahili", "sw"),
+        ("Afrikaans", "af"), ("Zulu", "zu"), ("Xhosa", "xh"), ("Sesotho", "st"), ("Yoruba", "yo"), ("Igbo", "ig"),
+        ("Hausa", "ha"), ("Somali", "so"), ("Amharic", "am"), ("Tigrinya", "ti"), ("Oromo", "om"), ("Kinyarwanda", "rw"),
+        ("Kirundi", "rn"), ("Lingala", "ln"), ("Luganda", "lg"), ("Shona", "sn"), ("Sesotho sa Leboa", "nso"),
+        ("Tswana", "tn"), ("Tsonga", "ts"), ("Venda", "ve"), ("Xitsonga", "xh")
     ]
 
     src_lang = tk.StringVar(value="en")
@@ -106,15 +45,30 @@ def run_subtitle_translation():
     tk.Button(root, text="Browse Subtitles", width=20, command=browse).pack(pady=5)
     tk.Label(root, textvariable=subfile_path).pack(pady=5)
 
-    # Language selection dropdowns
+    # Language selection dropdowns (aesthetic and practical)
+    import tkinter.ttk as ttk
     lang_frame = tk.Frame(root)
     lang_frame.pack(pady=10)
     tk.Label(lang_frame, text="From:").grid(row=0, column=0, padx=5)
-    src_menu = tk.OptionMenu(lang_frame, src_lang, *[code for name, code in LANGUAGES])
-    src_menu.grid(row=0, column=1, padx=5)
+    src_combo = ttk.Combobox(lang_frame, textvariable=src_lang, width=18, state="readonly")
+    src_combo['values'] = [f"{name} ({code})" for name, code in LANGUAGES]
+    src_combo.current([code for name, code in LANGUAGES].index(src_lang.get()))
+    src_combo.grid(row=0, column=1, padx=5)
     tk.Label(lang_frame, text="To:").grid(row=0, column=2, padx=5)
-    tgt_menu = tk.OptionMenu(lang_frame, tgt_lang, *[code for name, code in LANGUAGES])
-    tgt_menu.grid(row=0, column=3, padx=5)
+    tgt_combo = ttk.Combobox(lang_frame, textvariable=tgt_lang, width=18, state="readonly")
+    tgt_combo['values'] = [f"{name} ({code})" for name, code in LANGUAGES]
+    tgt_combo.current([code for name, code in LANGUAGES].index(tgt_lang.get()))
+    tgt_combo.grid(row=0, column=3, padx=5)
+
+    # Update language code on selection
+    def update_src(event):
+        idx = src_combo.current()
+        src_lang.set(LANGUAGES[idx][1])
+    def update_tgt(event):
+        idx = tgt_combo.current()
+        tgt_lang.set(LANGUAGES[idx][1])
+    src_combo.bind("<<ComboboxSelected>>", update_src)
+    tgt_combo.bind("<<ComboboxSelected>>", update_tgt)
 
     def ok():
         if not subfile_path.get():
