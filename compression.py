@@ -141,12 +141,16 @@ def run_compression(file_path, sub_option, sub_file, ext, max_size_gb):
                     sys.stdout.write(f'\rCompressing: [{bar}] {percent}% | ETA: {mins:02d}:{secs:02d}')
                     sys.stdout.flush()
         proc.wait()
+        # Always set to 100% and close window after process ends
         progress_var.set(duration)
         percent_label.config(text="100%")
         time_label.config(text="Estimated time left: 00:00")
         progress_win.update_idletasks()
-        progress_win.destroy()
-        sys.stdout.write('\n')
+        progress_win.after(500, progress_win.destroy)
+        # Force CMD progress bar to 100%
+        bar_len = 40
+        bar = '=' * bar_len
+        sys.stdout.write(f'\rCompressing: [{bar}] 100% | ETA: 00:00\n')
         sys.stdout.flush()
         if proc.returncode == 0:
             print(Fore.GREEN + f"\n✅ Compression finished. Output: {output_file}" + Style.RESET_ALL)
