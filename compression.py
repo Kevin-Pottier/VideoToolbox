@@ -86,10 +86,74 @@ def run_compression(file_path, sub_option, sub_file, ext, max_size_gb):
     print("\tCommand:", " ".join(ffmpeg_cmd))
     print()
 
-    # Run ffmpeg in the video's directory so all relative paths work
-    ret = subprocess.call(ffmpeg_cmd, cwd=video_dir)
+    # GUI progress bar setup
+    import threading
+    import tkinter as tk
+    import tkinter.ttk as ttk
+    progress_win = tk.Tk()
+    progress_win.title("Compression Progress")
+    progress_win.geometry("400x120")
+    progress_win.attributes('-topmost', True)
+    tk.Label(progress_win, text=f"Compressing: {video_name}").pack(pady=10)
+    progress_var = tk.DoubleVar()
+    progress_bar = ttk.Progressbar(progress_win, variable=progress_var, maximum=duration, length=350)
+    progress_bar.pack(pady=10)
+    percent_label = tk.Label(progress_win, text="0%")
+    percent_label.pack()
+    time_label = tk.Label(progress_win, text="Estimated time left: --:--")
+    time_label.pack()
 
-    if ret == 0:
-        print(Fore.GREEN + f"\n✅ Compression finished. Output: {output_file}" + Style.RESET_ALL)
-    else:
-        print(Fore.RED + f"\n❌ Compression failed." + Style.RESET_ALL)
+    import sys
+    def run_ffmpeg():
+        import time
+        proc = subprocess.Popen(ffmpeg_cmd, cwd=video_dir, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
+        last_time = 0
+        start_time = time.time()
+        bar_len = 40
+        while True:
+            line = proc.stderr.readline()
+            if not line:
+                if proc.poll() is not None:
+                    break
+                continue
+            if "time=" in line:
+                import re
+                match = re.search(r'time=(\d+):(\d+):(\d+\.\d+)', line)
+                if match:
+                    h, m, s = match.groups()
+                    cur_time = int(h) * 3600 + int(m) * 60 + float(s)
+                    last_time = cur_time
+                    progress_var.set(cur_time)
+                    percent = min(100, int(cur_time / duration * 100))
+                    percent_label.config(text=f"{percent}%")
+                    elapsed = time.time() - start_time
+                    if cur_time > 0 and percent < 100:
+                        est_total = elapsed / (cur_time / duration)
+                        remaining = est_total - elapsed
+                        mins, secs = divmod(int(remaining), 60)
+                        time_label.config(text=f"Estimated time left: {mins:02d}:{secs:02d}")
+                    else:
+                        time_label.config(text="Estimated time left: --:--")
+                    progress_win.update_idletasks()
+                    # CMD progress bar
+                    filled_len = int(round(bar_len * cur_time / float(duration)))
+                    bar = '=' * filled_len + '-' * (bar_len - filled_len)
+                    sys.stdout.write(f'\rCompressing: [{bar}] {percent}% | ETA: {mins:02d}:{secs:02d}')
+                    sys.stdout.flush()
+        proc.wait()
+        progress_var.set(duration)
+        percent_label.config(text="100%")
+        time_label.config(text="Estimated time left: 00:00")
+        progress_win.update_idletasks()
+        progress_win.destroy()
+        sys.stdout.write('\n')
+        sys.stdout.flush()
+        if proc.returncode == 0:
+            print(Fore.GREEN + f"\n✅ Compression finished. Output: {output_file}" + Style.RESET_ALL)
+        else:
+            print(Fore.RED + f"\n❌ Compression failed." + Style.RESET_ALL)
+
+    thread = threading.Thread(target=run_ffmpeg)
+    thread.start()
+    progress_win.mainloop()
+    thread.join()  # Wait for compression to finish before returning
