@@ -4,7 +4,23 @@ from utils import ffprobe
 import subprocess
 
 def run_compression(file_path, sub_option, sub_file, ext, max_size_gb):
+    """
+    Compress a video file using FFmpeg, with optional subtitle handling and GUI/CLI progress bars.
+    Args:
+        file_path (str): Path to the video file.
+        sub_option (str): Subtitle option ('none', 'soft', 'hard').
+        sub_file (str): Path to the subtitle file (if any).
+        ext (str): Output file extension ('mp4' or 'mkv').
+        max_size_gb (float): Target maximum file size in GB.
+    """
     def ffmpeg_escape(path):
+        """
+        Escape a file path for FFmpeg compatibility (Windows).
+        Args:
+            path (str): The file path to escape.
+        Returns:
+            str: Escaped path.
+        """
         # Use forward slashes and escape special chars for FFmpeg
         return os.path.abspath(path).replace("\\", "/").replace(":", "\\:")
 
@@ -105,6 +121,9 @@ def run_compression(file_path, sub_option, sub_file, ext, max_size_gb):
 
     import sys
     def run_ffmpeg():
+        """
+        Run FFmpeg as a subprocess, parse its output for progress, and update both GUI and CLI progress bars.
+        """
         import time
         proc = subprocess.Popen(ffmpeg_cmd, cwd=video_dir, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
         last_time = 0

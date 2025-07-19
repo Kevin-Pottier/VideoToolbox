@@ -8,6 +8,13 @@ import concurrent.futures
 
 
 def run_subtitle_translation():
+    """
+    Orchestrates the subtitle translation workflow:
+    - Subtitle file selection
+    - Language selection (source/target)
+    - Runs translation with progress bar
+    - Saves translated subtitle
+    """
     root = tk.Tk()
     root.title("Subtitle Translation")
     root.geometry("400x300")
@@ -37,6 +44,9 @@ def run_subtitle_translation():
     tgt_lang = tk.StringVar(value="fr")
 
     def browse():
+        """
+        Open a file dialog for the user to select a subtitle file.
+        """
         root.lift()
         root.attributes('-topmost', True)
         subfile_path.set(filedialog.askopenfilename(title="Choose subtitle file", filetypes=[("Subtitles", "*.srt *.ass")]))
@@ -62,15 +72,24 @@ def run_subtitle_translation():
 
     # Update language code on selection
     def update_src(event):
+        """
+        Update the source language code when the user selects a new language.
+        """
         idx = src_combo.current()
         src_lang.set(LANGUAGES[idx][1])
     def update_tgt(event):
+        """
+        Update the target language code when the user selects a new language.
+        """
         idx = tgt_combo.current()
         tgt_lang.set(LANGUAGES[idx][1])
     src_combo.bind("<<ComboboxSelected>>", update_src)
     tgt_combo.bind("<<ComboboxSelected>>", update_tgt)
 
     def ok():
+        """
+        Run the translation process and save the translated subtitle file.
+        """
         if not subfile_path.get():
             msg_root = tk.Tk()
             msg_root.attributes('-topmost', True)
@@ -90,6 +109,13 @@ def run_subtitle_translation():
         # Console progress bar setup
         import sys
         def print_progress(count, total, bar_len=40):
+            """
+            Print a command-line progress bar for translation.
+            Args:
+                count (int): Number of lines translated so far.
+                total (int): Total number of lines.
+                bar_len (int): Length of the progress bar.
+            """
             filled_len = int(round(bar_len * count / float(total)))
             bar = '=' * filled_len + '-' * (bar_len - filled_len)
             percent = round(100.0 * count / float(total), 1)
@@ -101,6 +127,12 @@ def run_subtitle_translation():
         results = [None] * total
 
         def translate_and_update(idx, text):
+            """
+            Translate a single subtitle line and update the results list.
+            Args:
+                idx (int): Index of the subtitle line.
+                text (str): Text to translate.
+            """
             try:
                 translated = translator.translate(text)
             except Exception as e:

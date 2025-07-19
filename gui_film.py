@@ -5,6 +5,14 @@ import os
 from compression import run_compression
 
 def run_film_compression():
+    """
+    Orchestrates the film compression workflow:
+    - Video file selection
+    - Subtitle options (none, soft, hard)
+    - Output container selection
+    - Target size input
+    - Calls run_compression with all parameters
+    """
     # Step 1: Select video file
     file_path = None
     while not file_path:
@@ -32,6 +40,9 @@ def run_film_compression():
         sub_root.geometry("350x220")
         tk.Label(sub_root, text="Subtitle options:").pack(pady=5)
         def toggle_sub():
+            """
+            Enable or disable the subtitle file selection button based on the selected subtitle option.
+            """
             if sub_option_var.get() == "none":
                 sub_btn.config(state="disabled")
                 sub_file_var.set("")
@@ -45,6 +56,9 @@ def run_film_compression():
         sub_label = tk.Label(sub_root, textvariable=sub_file_var)
         sub_label.pack(pady=5)
         def ok():
+            """
+            Confirm subtitle selection and close the dialog.
+            """
             sub_root.quit()
         tk.Button(sub_root, text="OK", command=ok).pack(pady=10)
         sub_root.after(100, toggle_sub)
@@ -65,6 +79,11 @@ def run_film_compression():
     container_root.attributes('-topmost', True)
     container_choice = tk.StringVar(value="mp4")
     def set_choice(val):
+        """
+        Set the output container choice and close the dialog.
+        Args:
+            val (str): The selected container ('mp4' or 'mkv').
+        """
         container_choice.set(val)
         container_root.quit()
     container_win = tk.Toplevel(container_root)
