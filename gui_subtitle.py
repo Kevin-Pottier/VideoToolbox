@@ -171,8 +171,9 @@ def run_subtitle_translation():
         print(Fore.GREEN + "\nTranslation completed. Output saved as _translated.srt" + Style.RESET_ALL)
         subs.save(f"{os.path.splitext(subfile_path.get())[0]}_translated.srt", encoding='utf-8')
         def finish():
-            status_label.config(text="Translation completed! Output saved.")
-            ok_btn.config(state="normal")
+            # Show completion message and close window
+            messagebox.showinfo("Translation Complete", f"Translation completed!\nOutput saved as:\n{subs.save_path if hasattr(subs, 'save_path') else os.path.splitext(subfile_path.get())[0] + '_translated.srt'}")
+            root.destroy()
         root.after(0, finish)
 
     root.mainloop()
