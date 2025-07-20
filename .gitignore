@@ -21,6 +21,7 @@ __pycache__/
 *.pyo
 *.log
 *.DS_Store
+*.spec
 
 !.gitignore
 !README.Md
