@@ -143,14 +143,26 @@ def run_subtitle_translation():
             status_label.config(text=f"Translating... {percent}% ({count}/{total})")
             root.update_idletasks()
 
-        for idx, sub in enumerate(subs):
+
+        import threading
+        completed = [0]  # mutable counter for progress
+
+        def translate_and_update(idx, text):
             try:
-                translated = translator.translate(sub.text)
+                translated = translator.translate(text)
             except Exception as e:
                 print(Fore.RED + f"Error translating: {e}" + Style.RESET_ALL)
-                translated = sub.text
+                translated = text
             results[idx] = translated
-            update_progress(idx + 1)
+            # Thread-safe progress update
+            def update():
+                completed[0] += 1
+                update_progress(completed[0])
+            root.after(0, update)
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
+            futures = [executor.submit(translate_and_update, idx, sub.text) for idx, sub in enumerate(subs)]
+            concurrent.futures.wait(futures)
 
         # Assign translated text back
         for sub, translated in zip(subs, results):
