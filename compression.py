@@ -3,7 +3,7 @@ from colorama import Fore, Style
 from utils import ffprobe
 import subprocess
 
-def run_compression(file_path, sub_option, sub_file, ext, max_size_gb):
+def run_compression(file_path, sub_option, sub_file, ext, max_size_gb, gui_progress=None):
     """
     Compress a video file using FFmpeg, with optional subtitle handling and GUI/CLI progress bars.
     Args:
@@ -102,22 +102,68 @@ def run_compression(file_path, sub_option, sub_file, ext, max_size_gb):
     print("\tCommand:", " ".join(ffmpeg_cmd))
     print()
 
-    # GUI progress bar setup
+    # GUI progress bar setup (only if not in batch mode)
     import threading
     import tkinter as tk
     import tkinter.ttk as ttk
-    progress_win = tk.Tk()
-    progress_win.title("Compression Progress")
-    progress_win.geometry("400x120")
-    progress_win.attributes('-topmost', True)
-    tk.Label(progress_win, text=f"Compressing: {video_name}").pack(pady=10)
-    progress_var = tk.DoubleVar()
-    progress_bar = ttk.Progressbar(progress_win, variable=progress_var, maximum=duration, length=350)
-    progress_bar.pack(pady=10)
-    percent_label = tk.Label(progress_win, text="0%")
-    percent_label.pack()
-    time_label = tk.Label(progress_win, text="Estimated time left: --:--")
-    time_label.pack()
+    if gui_progress is None:
+        # Use Toplevel if a root window exists, else Tk
+        try:
+            root = tk._default_root
+        except AttributeError:
+            root = None
+        if root is not None and root.winfo_exists():
+            progress_win = tk.Toplevel(root)
+        else:
+            progress_win = tk.Tk()
+        progress_win.title("Compression Progress")
+        progress_win.geometry("400x120")
+        progress_win.attributes('-topmost', True)
+        tk.Label(progress_win, text=f"Compressing: {video_name}").pack(pady=10)
+        progress_var = tk.DoubleVar(master=progress_win)
+        progress_bar = ttk.Progressbar(progress_win, variable=progress_var, maximum=duration, length=350)
+        progress_bar.pack(pady=10)
+        percent_label = tk.Label(progress_win, text="0%")
+        percent_label.pack()
+        time_label = tk.Label(progress_win, text="Estimated time left: --:--")
+        time_label.pack()
+
+        def update_gui(cur_time, percent, mins, secs):
+            if not progress_win.winfo_exists():
+                return
+            try:
+                progress_var.set(cur_time)
+                percent_label.config(text=f"{percent}%")
+                if mins is not None and secs is not None:
+                    time_label.config(text=f"Estimated time left: {mins:02d}:{secs:02d}")
+                else:
+                    time_label.config(text="Estimated time left: --:--")
+                progress_win.update_idletasks()
+            except Exception:
+                pass
+
+        def finalize_gui():
+            if not progress_win.winfo_exists():
+                return
+            try:
+                progress_var.set(duration)
+                percent_label.config(text="100%")
+                time_label.config(text="Estimated time left: 00:00")
+                progress_win.update_idletasks()
+            except Exception:
+                pass
+            # Schedule window close after 500ms if still open
+            def safe_destroy():
+                try:
+                    if progress_win.winfo_exists():
+                        progress_win.destroy()
+                except Exception:
+                    pass
+            try:
+                if progress_win.winfo_exists():
+                    progress_win.after(500, safe_destroy)
+            except Exception:
+                pass
 
     import sys
     def run_ffmpeg():
@@ -142,41 +188,57 @@ def run_compression(file_path, sub_option, sub_file, ext, max_size_gb):
                     h, m, s = match.groups()
                     cur_time = int(h) * 3600 + int(m) * 60 + float(s)
                     last_time = cur_time
-                    progress_var.set(cur_time)
                     percent = min(100, int(cur_time / duration * 100))
-                    percent_label.config(text=f"{percent}%")
-                    elapsed = time.time() - start_time
-                    if cur_time > 0 and percent < 100:
-                        est_total = elapsed / (cur_time / duration)
-                        remaining = est_total - elapsed
-                        mins, secs = divmod(int(remaining), 60)
-                        time_label.config(text=f"Estimated time left: {mins:02d}:{secs:02d}")
+                    if gui_progress:
+                        gui_progress(percent)
                     else:
-                        time_label.config(text="Estimated time left: --:--")
-                    progress_win.update_idletasks()
-                    # CMD progress bar
-                    filled_len = int(round(bar_len * cur_time / float(duration)))
-                    bar = '=' * filled_len + '-' * (bar_len - filled_len)
-                    sys.stdout.write(f'\rCompressing: [{bar}] {percent}% | ETA: {mins:02d}:{secs:02d}')
-                    sys.stdout.flush()
+                        elapsed = time.time() - start_time
+                        if cur_time > 0 and percent < 100:
+                            est_total = elapsed / (cur_time / duration)
+                            remaining = est_total - elapsed
+                            mins, secs = divmod(int(remaining), 60)
+                        else:
+                            mins, secs = None, None
+                        progress_win.after(0, update_gui, cur_time, percent, mins, secs)
+                        # CMD progress bar
+                        filled_len = int(round(bar_len * cur_time / float(duration)))
+                        bar = '=' * filled_len + '-' * (bar_len - filled_len)
+                        sys.stdout.write(f'\rCompressing: [{bar}] {percent}% | ETA: {mins if mins is not None else 0:02d}:{secs if secs is not None else 0:02d}')
+                        sys.stdout.flush()
         proc.wait()
-        # Always set to 100% and close window after process ends
-        progress_var.set(duration)
-        percent_label.config(text="100%")
-        time_label.config(text="Estimated time left: 00:00")
-        progress_win.update_idletasks()
-        progress_win.after(500, progress_win.destroy)
-        # Force CMD progress bar to 100%
-        bar_len = 40
-        bar = '=' * bar_len
-        sys.stdout.write(f'\rCompressing: [{bar}] 100% | ETA: 00:00\n')
-        sys.stdout.flush()
+        # Always set to 100% at the end
+        if gui_progress:
+            try:
+                gui_progress(100)
+            except Exception:
+                pass
+        else:
+            progress_win.after(0, finalize_gui)
+            # Force CMD progress bar to 100%
+            bar_len = 40
+            bar = '=' * bar_len
+            sys.stdout.write(f'\rCompressing: [{bar}] 100% | ETA: 00:00\n')
+            sys.stdout.flush()
         if proc.returncode == 0:
             print(Fore.GREEN + f"\n✅ Compression finished. Output: {output_file}" + Style.RESET_ALL)
         else:
             print(Fore.RED + f"\n❌ Compression failed." + Style.RESET_ALL)
 
-    thread = threading.Thread(target=run_ffmpeg)
-    thread.start()
-    progress_win.mainloop()
-    thread.join()  # Wait for compression to finish before returning
+    if gui_progress is None:
+        # Use a flag to signal when done
+        done_flag = threading.Event()
+        def run_ffmpeg_and_finalize():
+            run_ffmpeg()
+            # Finalize GUI from main thread, only if window still exists
+            try:
+                if progress_win.winfo_exists():
+                    progress_win.after(0, finalize_gui)
+            except Exception:
+                pass
+            done_flag.set()
+        thread = threading.Thread(target=run_ffmpeg_and_finalize)
+        thread.start()
+        progress_win.mainloop()
+        thread.join()  # Wait for compression to finish before returning
+    else:
+        run_ffmpeg()
