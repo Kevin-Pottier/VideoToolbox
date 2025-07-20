@@ -2,7 +2,7 @@
 
 # VideoCompress
 
-Modern, user-friendly Python GUI for compressing one or multiple video files and translating subtitles, with per-file progress, ETA, and advanced batch features.
+Modern, user-friendly Python GUI for compressing one or multiple video files and translating subtitles, with per-file progress, ETA, advanced batch features, and a fast, responsive, multi-threaded subtitle translation workflow with GUI progress bar.
 
 ## Features
 - Unified video compression: select one or multiple videos, all in one workflow.
@@ -10,7 +10,7 @@ Modern, user-friendly Python GUI for compressing one or multiple video files and
 - Modern UI: clean, dark-themed interface, clear fonts, colors, and spacing.
 - Subtitle handling: for each video, choose to ignore, softcode, or hardcode subtitles.
 - Efficient batch subtitle workflow: first select which videos need subtitles, then only configure those.
-- Subtitle translation: translate .srt files between languages with progress feedback.
+- Subtitle translation: translate .srt files between languages with a fast, multi-threaded workflow, real-time GUI progress bar, and completion notification.
 - Robust error handling and user feedback throughout.
 
 ## Requirements
@@ -29,8 +29,8 @@ Modern, user-friendly Python GUI for compressing one or multiple video files and
 3. Run the app:
    `python main.py`
 4. Choose a mode:
-   - Video Compression: Select one or more videos, configure subtitles, output format, and size.
-   - Subtitle Translation: Translate a subtitle file between languages.
+   - **Video Compression**: Select one or more videos, configure subtitles, output format, and size. Batch mode shows a scrollable window with per-file progress and ETA.
+   - **Subtitle Translation**: Translate a subtitle file between languages. The translation is fast (multi-threaded), the GUI remains responsive, and a progress bar shows real-time status. When finished, a message box confirms completion and the window closes automatically.
 
 ## Major Changes
 - Unified single and batch video compression into one workflow.
@@ -43,25 +43,42 @@ Modern, user-friendly Python GUI for compressing one or multiple video files and
 ## License
 MIT
 
-## Making an .exe out of this code
-You can have a .exe out of this script to make it easier to access and share to your friends. 
-1. To do so, you first need to install `pyinstaller`
-```bash 
-pip install pyinstaller
-```
-2. You can just run the following command: 
-```bash
-pyinstaller --onefile CompressMovie.py
-```
+
+## Making an .exe (Windows executable)
+You can create a standalone `.exe` for easy sharing and use on Windows:
+
+1. **Install PyInstaller** (if not already installed):
+   ```bash
+   pip install pyinstaller
+   ```
+
+
+2. **Build the executable** (from the project folder):
+   ```bash
+   pyinstaller --onefile --add-data "main.py;." --add-data "gui_helpers.py;." --add-data "gui_film.py;." --add-data "gui_subtitle.py;." --add-data "compression.py;." --add-data "utils.py;." main.py
+   ```
+   - `--onefile`: Bundle everything into a single .exe
+   - `--add-data "<file.py>;."`: Ensures each Python module is included (repeat for all .py files in the project)
+   - If you use additional data files (like themes), add them with more `--add-data` options.
+
+3. **Find your .exe** in the `dist` folder as `main.exe`. You can rename it if you wish.
+
+4. **Distribute**: Share the `.exe` file with others. They do not need Python installed.
+
+**Note:**
+- If you see missing module errors, add them with more `--add-data` or check your imports.
+
 
 ## Changelog
 
+
 ### July 2025
 - Subtitle translation workflow now fully implemented:
-  - Uses Google Translate (deep-translator) to translate all lines from English to French.
+  - Uses Google Translate (deep-translator) to translate all lines between any supported languages.
   - Fast, multi-threaded translation for speed.
-  - Real-time progress bar in the command line.
+  - Real-time progress bar in the GUI (not just command line).
   - Output saved as `_translated.srt`.
+  - GUI remains responsive during translation, and a completion message is shown when done.
 - Requirements updated: now uses `colorama`, `pysrt`, and `deep-translator`.
 - `.gitignore` and documentation updated to reflect new modular structure and ignored files.
 
