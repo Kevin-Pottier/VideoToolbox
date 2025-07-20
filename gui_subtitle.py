@@ -101,10 +101,18 @@ def run_subtitle_translation():
     src_combo.bind("<<ComboboxSelected>>", update_src)
     tgt_combo.bind("<<ComboboxSelected>>", update_tgt)
 
-    def ok():
-        """
-        Run the translation process and save the translated subtitle file.
-        """
+    # --- Progress bar and status label ---
+    progress_var = tk.DoubleVar(value=0)
+    progress_bar = ttk.Progressbar(frame, variable=progress_var, maximum=100, length=320, style='TProgressbar')
+    progress_bar.pack(pady=(10, 0))
+    status_label = create_styled_label(frame, "", style='TLabel', font=("Segoe UI", 10, "italic"))
+    status_label.pack(pady=(4, 0))
+
+    # --- OK button (will be disabled during translation) ---
+    ok_btn = create_styled_button(frame, text="OK", command=lambda: start_translation())
+    ok_btn.pack(pady=16)
+
+    def start_translation():
         if not subfile_path.get():
             msg_root = tk.Tk()
             msg_root.attributes('-topmost', True)
@@ -112,7 +120,14 @@ def run_subtitle_translation():
             messagebox.showerror("File Error", "No subtitle file selected.", parent=msg_root)
             msg_root.destroy()
             return
+        ok_btn.config(state="disabled")
+        progress_var.set(0)
+        status_label.config(text="Starting translation...")
+        root.update_idletasks()
+        import threading
+        threading.Thread(target=translate_subtitles, daemon=True).start()
 
+    def translate_subtitles():
         source = src_lang.get()
         target = tgt_lang.get()
         print(Fore.GREEN + f"Selected subtitle file for translation: {subfile_path.get()}" + Style.RESET_ALL)
@@ -120,45 +135,22 @@ def run_subtitle_translation():
         subs = pysrt.open(subfile_path.get(), encoding='utf-8')
         translator = GoogleTranslator(source=source, target=target)
         total = len(subs)
-
-        # Console progress bar setup
-        import sys
-        def print_progress(count, total, bar_len=40):
-            """
-            Print a command-line progress bar for translation.
-            Args:
-                count (int): Number of lines translated so far.
-                total (int): Total number of lines.
-                bar_len (int): Length of the progress bar.
-            """
-            filled_len = int(round(bar_len * count / float(total)))
-            bar = '=' * filled_len + '-' * (bar_len - filled_len)
-            percent = round(100.0 * count / float(total), 1)
-            sys.stdout.write(f'\rTranslating: [{bar}] {percent}% ({count}/{total})')
-            sys.stdout.flush()
-            if count == total:
-                print()
-
         results = [None] * total
 
-        def translate_and_update(idx, text):
-            """
-            Translate a single subtitle line and update the results list.
-            Args:
-                idx (int): Index of the subtitle line.
-                text (str): Text to translate.
-            """
+        def update_progress(count):
+            percent = int(100.0 * count / float(total))
+            progress_var.set(percent)
+            status_label.config(text=f"Translating... {percent}% ({count}/{total})")
+            root.update_idletasks()
+
+        for idx, sub in enumerate(subs):
             try:
-                translated = translator.translate(text)
+                translated = translator.translate(sub.text)
             except Exception as e:
                 print(Fore.RED + f"Error translating: {e}" + Style.RESET_ALL)
-                translated = text
+                translated = sub.text
             results[idx] = translated
-            print_progress(sum(r is not None for r in results), total)
-
-        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
-            futures = [executor.submit(translate_and_update, idx, sub.text) for idx, sub in enumerate(subs)]
-            concurrent.futures.wait(futures)
+            update_progress(idx + 1)
 
         # Assign translated text back
         for sub, translated in zip(subs, results):
@@ -166,8 +158,10 @@ def run_subtitle_translation():
 
         print(Fore.GREEN + "\nTranslation completed. Output saved as _translated.srt" + Style.RESET_ALL)
         subs.save(f"{os.path.splitext(subfile_path.get())[0]}_translated.srt", encoding='utf-8')
-        root.quit()
+        def finish():
+            status_label.config(text="Translation completed! Output saved.")
+            ok_btn.config(state="normal")
+        root.after(0, finish)
 
-    create_styled_button(frame, text="OK", command=ok).pack(pady=16)
     root.mainloop()
     root.destroy()
