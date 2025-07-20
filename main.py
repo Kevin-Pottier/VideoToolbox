@@ -1,5 +1,4 @@
 
-from gui_film import run_film_compression
 from gui_subtitle import run_subtitle_translation
 import tkinter as tk
 
@@ -24,8 +23,7 @@ def choose_usage_dialog():
     root.geometry("300x200")
     root.attributes('-topmost', True)
     tk.Label(root, text="Choose how to use this script:").pack(pady=10)
-    tk.Button(root, text="Film Compression", width=20, command=lambda: set_usage("film_compression")).pack(pady=5)
-    tk.Button(root, text="Multiple Videos Compression", width=20, command=lambda: set_usage("batch_film_compression")).pack(pady=5)
+    tk.Button(root, text="Video Compression", width=20, command=lambda: set_usage("video_compression")).pack(pady=5)
     tk.Button(root, text="Subtitle Translation", width=20, command=lambda: set_usage("sub_translation")).pack(pady=5)
     root.mainloop()
     root.destroy()
@@ -36,11 +34,9 @@ def main():
     Main entry point for the script. Runs the selected workflow based on user choice.
     """
     usage = choose_usage_dialog()
-    if usage == "film_compression":
-        run_film_compression()
-    elif usage == "batch_film_compression":
-        from gui_film import run_batch_film_compression
-        run_batch_film_compression()
+    if usage == "video_compression":
+        from gui_film import run_video_compression
+        run_video_compression()
     elif usage == "sub_translation":
         run_subtitle_translation()
 
