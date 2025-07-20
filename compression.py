@@ -121,21 +121,28 @@ def run_compression(file_path, sub_option, sub_file, ext, max_size_gb, gui_progr
         progress_win.attributes('-topmost', True)
         progress_win.configure(bg="#23272e")
         style = ttk.Style(progress_win)
-        style.theme_use('clam')
-        style.configure('TLabel', background="#23272e", foreground="#e0e0e0", font=("Segoe UI", 11))
-        style.configure('Title.TLabel', background="#23272e", foreground="#00bfff", font=("Segoe UI", 13, "bold"))
-        style.configure('TButton', font=("Segoe UI", 11), padding=6, background="#2d333b", foreground="#ffffff")
-        style.map('TButton', background=[('active', '#00bfff')], foreground=[('active', '#23272e')])
-        style.configure('TProgressbar', troughcolor="#23272e", background="#00bfff", thickness=18)
-        frame = ttk.Frame(progress_win)
+        try:
+            style.theme_use('azure-dark')
+        except Exception:
+            style.theme_use('clam')
+            style.configure('TLabel', background="#23272e", foreground="#f5f6fa", font=("Segoe UI", 11))
+            style.configure('Title.TLabel', background="#23272e", foreground="#4fd1c5", font=("Segoe UI", 13, "bold"))
+            style.configure('TButton', font=("Segoe UI", 11), padding=6, background="#353b48", foreground="#f5f6fa", borderwidth=0)
+            style.map('TButton',
+                background=[('active', '#4fd1c5'), ('!active', '#353b48')],
+                foreground=[('active', '#23272e'), ('!active', '#f5f6fa')]
+            )
+            style.configure('TProgressbar', troughcolor="#23272e", background="#4fd1c5", thickness=18)
+        frame = ttk.Frame(progress_win, style='TFrame')
         frame.pack(fill="both", expand=True, padx=10, pady=10)
-        ttk.Label(frame, text=f"Compressing: {video_name}", style='Title.TLabel').pack(pady=(0, 8))
+        ttk.Label(frame, text=f"Compressing: {video_name}", style='Title.TLabel', background="#23272e").pack(pady=(0, 8))
         progress_var = tk.DoubleVar(master=progress_win)
         progress_bar = ttk.Progressbar(frame, variable=progress_var, maximum=duration, length=350, style='TProgressbar')
         progress_bar.pack(pady=6)
-        percent_label = ttk.Label(frame, text="0%", style='TLabel')
+        # Overlay a label on top of the progress bar for percent, with matching background
+        percent_label = ttk.Label(frame, text="0%", style='TLabel', background="#23272e")
         percent_label.pack()
-        time_label = ttk.Label(frame, text="Estimated time left: --:--", style='TLabel', font=("Segoe UI", 10, "italic"))
+        time_label = ttk.Label(frame, text="Estimated time left: --:--", style='TLabel', font=("Segoe UI", 10, "italic"), background="#23272e")
         time_label.pack()
 
         def update_gui(cur_time, percent, mins, secs):

@@ -23,15 +23,21 @@ def run_subtitle_translation():
     root.configure(bg="#23272e")
     subfile_path = tk.StringVar()
 
-    # ttk style
+    # Try to use a modern ttk theme (azure-dark if available), else fallback to clam with improved colors
     style = ttk.Style(root)
-    style.theme_use('clam')
-    style.configure('TFrame', background="#23272e")
-    style.configure('TLabel', background="#23272e", foreground="#e0e0e0", font=("Segoe UI", 11))
-    style.configure('Title.TLabel', background="#23272e", foreground="#00bfff", font=("Segoe UI", 14, "bold"))
-    style.configure('TButton', font=("Segoe UI", 11), padding=6, background="#2d333b", foreground="#ffffff")
-    style.map('TButton', background=[('active', '#00bfff')], foreground=[('active', '#23272e')])
-    style.configure('TCombobox', fieldbackground="#2d333b", background="#2d333b", foreground="#e0e0e0", font=("Segoe UI", 10))
+    try:
+        style.theme_use('azure-dark')
+    except Exception:
+        style.theme_use('clam')
+        style.configure('TFrame', background="#23272e")
+        style.configure('TLabel', background="#23272e", foreground="#f5f6fa", font=("Segoe UI", 11))
+        style.configure('Title.TLabel', background="#23272e", foreground="#4fd1c5", font=("Segoe UI", 14, "bold"))
+        style.configure('TButton', font=("Segoe UI", 11), padding=6, background="#353b48", foreground="#f5f6fa", borderwidth=0)
+        style.map('TButton',
+            background=[('active', '#4fd1c5'), ('!active', '#353b48')],
+            foreground=[('active', '#23272e'), ('!active', '#f5f6fa')]
+        )
+        style.configure('TCombobox', fieldbackground="#353b48", background="#353b48", foreground="#f5f6fa", font=("Segoe UI", 10))
 
     frame = ttk.Frame(root)
     frame.pack(fill="both", expand=True, padx=10, pady=10)

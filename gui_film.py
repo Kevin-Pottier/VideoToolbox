@@ -1,4 +1,3 @@
-
 import concurrent.futures
 import tkinter as tk
 from tkinter import filedialog, simpledialog, messagebox
@@ -40,11 +39,17 @@ def run_video_compression():
             sub_root.geometry("400x240")
             sub_root.configure(bg="#23272e")
             style = ttk.Style(sub_root)
-            style.theme_use('clam')
-            style.configure('TLabel', background="#23272e", foreground="#e0e0e0", font=("Segoe UI", 11))
-            style.configure('TRadiobutton', background="#23272e", foreground="#e0e0e0", font=("Segoe UI", 10))
-            style.configure('TButton', font=("Segoe UI", 11), padding=6, background="#2d333b", foreground="#ffffff")
-            style.map('TButton', background=[('active', '#00bfff')], foreground=[('active', '#23272e')])
+            try:
+                style.theme_use('azure-dark')
+            except Exception:
+                style.theme_use('clam')
+                style.configure('TLabel', background="#23272e", foreground="#f5f6fa", font=("Segoe UI", 11))
+                style.configure('TRadiobutton', background="#23272e", foreground="#f5f6fa", font=("Segoe UI", 10))
+                style.configure('TButton', font=("Segoe UI", 11), padding=6, background="#353b48", foreground="#f5f6fa", borderwidth=0)
+                style.map('TButton',
+                    background=[('active', '#4fd1c5'), ('!active', '#353b48')],
+                    foreground=[('active', '#23272e'), ('!active', '#f5f6fa')]
+                )
             frame = ttk.Frame(sub_root)
             frame.pack(fill="both", expand=True, padx=10, pady=10)
             ttk.Label(frame, text=f"Subtitle options for:\n{os.path.basename(path)}").pack(pady=5)
@@ -91,10 +96,16 @@ def run_video_compression():
         container_win.attributes('-topmost', True)
         container_win.configure(bg="#23272e")
         style = ttk.Style(container_win)
-        style.theme_use('clam')
-        style.configure('TLabel', background="#23272e", foreground="#e0e0e0", font=("Segoe UI", 11))
-        style.configure('TButton', font=("Segoe UI", 11), padding=6, background="#2d333b", foreground="#ffffff")
-        style.map('TButton', background=[('active', '#00bfff')], foreground=[('active', '#23272e')])
+        try:
+            style.theme_use('azure-dark')
+        except Exception:
+            style.theme_use('clam')
+            style.configure('TLabel', background="#23272e", foreground="#f5f6fa", font=("Segoe UI", 11))
+            style.configure('TButton', font=("Segoe UI", 11), padding=6, background="#353b48", foreground="#f5f6fa", borderwidth=0)
+            style.map('TButton',
+                background=[('active', '#4fd1c5'), ('!active', '#353b48')],
+                foreground=[('active', '#23272e'), ('!active', '#f5f6fa')]
+            )
         frame = ttk.Frame(container_win)
         frame.pack(fill="both", expand=True, padx=10, pady=10)
         ttk.Label(frame, text="Choose the output container:").pack(pady=10)
@@ -139,11 +150,17 @@ def run_video_compression():
     checklist_root.attributes('-topmost', True)
     checklist_root.configure(bg="#23272e")
     style = ttk.Style(checklist_root)
-    style.theme_use('clam')
-    style.configure('TLabel', background="#23272e", foreground="#e0e0e0", font=("Segoe UI", 12, "bold"))
-    style.configure('TCheckbutton', background="#23272e", foreground="#e0e0e0", font=("Segoe UI", 10))
-    style.configure('TButton', font=("Segoe UI", 11), padding=6, background="#2d333b", foreground="#ffffff")
-    style.map('TButton', background=[('active', '#00bfff')], foreground=[('active', '#23272e')])
+    try:
+        style.theme_use('azure-dark')
+    except Exception:
+        style.theme_use('clam')
+        style.configure('TLabel', background="#23272e", foreground="#f5f6fa", font=("Segoe UI", 12, "bold"))
+        style.configure('TCheckbutton', background="#23272e", foreground="#f5f6fa", font=("Segoe UI", 10))
+        style.configure('TButton', font=("Segoe UI", 11), padding=6, background="#353b48", foreground="#f5f6fa", borderwidth=0)
+        style.map('TButton',
+            background=[('active', '#4fd1c5'), ('!active', '#353b48')],
+            foreground=[('active', '#23272e'), ('!active', '#f5f6fa')]
+        )
     need_subs = [tk.BooleanVar(master=checklist_root, value=False) for _ in file_paths]
     ttk.Label(checklist_root, text="Select which videos need subtitles:").pack(pady=10)
     frame = ttk.Frame(checklist_root)
@@ -172,11 +189,17 @@ def run_video_compression():
             sub_root.geometry("400x240")
             sub_root.configure(bg="#23272e")
             style = ttk.Style(sub_root)
-            style.theme_use('clam')
-            style.configure('TLabel', background="#23272e", foreground="#e0e0e0", font=("Segoe UI", 11))
-            style.configure('TRadiobutton', background="#23272e", foreground="#e0e0e0", font=("Segoe UI", 10))
-            style.configure('TButton', font=("Segoe UI", 11), padding=6, background="#2d333b", foreground="#ffffff")
-            style.map('TButton', background=[('active', '#00bfff')], foreground=[('active', '#23272e')])
+            try:
+                style.theme_use('azure-dark')
+            except Exception:
+                style.theme_use('clam')
+                style.configure('TLabel', background="#23272e", foreground="#f5f6fa", font=("Segoe UI", 11))
+                style.configure('TRadiobutton', background="#23272e", foreground="#f5f6fa", font=("Segoe UI", 10))
+                style.configure('TButton', font=("Segoe UI", 11), padding=6, background="#353b48", foreground="#f5f6fa", borderwidth=0)
+                style.map('TButton',
+                    background=[('active', '#4fd1c5'), ('!active', '#353b48')],
+                    foreground=[('active', '#23272e'), ('!active', '#f5f6fa')]
+                )
             frame = ttk.Frame(sub_root)
             frame.pack(fill="both", expand=True, padx=10, pady=10)
             ttk.Label(frame, text=f"Subtitle options for:\n{os.path.basename(path)}").pack(pady=5)
@@ -224,10 +247,16 @@ def run_video_compression():
     container_win.attributes('-topmost', True)
     container_win.configure(bg="#23272e")
     style = ttk.Style(container_win)
-    style.theme_use('clam')
-    style.configure('TLabel', background="#23272e", foreground="#e0e0e0", font=("Segoe UI", 11))
-    style.configure('TButton', font=("Segoe UI", 11), padding=6, background="#2d333b", foreground="#ffffff")
-    style.map('TButton', background=[('active', '#00bfff')], foreground=[('active', '#23272e')])
+    try:
+        style.theme_use('azure-dark')
+    except Exception:
+        style.theme_use('clam')
+        style.configure('TLabel', background="#23272e", foreground="#f5f6fa", font=("Segoe UI", 11))
+        style.configure('TButton', font=("Segoe UI", 11), padding=6, background="#353b48", foreground="#f5f6fa", borderwidth=0)
+        style.map('TButton',
+            background=[('active', '#4fd1c5'), ('!active', '#353b48')],
+            foreground=[('active', '#23272e'), ('!active', '#f5f6fa')]
+        )
     frame = ttk.Frame(container_win)
     frame.pack(fill="both", expand=True, padx=10, pady=10)
     ttk.Label(frame, text="Choose the output container (applies to all):").pack(pady=10)
@@ -273,12 +302,18 @@ def run_video_compression():
     progress_root.attributes('-topmost', True)
     progress_root.configure(bg="#23272e")
     style = ttk.Style(progress_root)
-    style.theme_use('clam')
-    style.configure('TLabel', background="#23272e", foreground="#e0e0e0", font=("Segoe UI", 11))
-    style.configure('Title.TLabel', background="#23272e", foreground="#00bfff", font=("Segoe UI", 14, "bold"))
-    style.configure('TButton', font=("Segoe UI", 11), padding=6, background="#2d333b", foreground="#ffffff")
-    style.map('TButton', background=[('active', '#00bfff')], foreground=[('active', '#23272e')])
-    style.configure('TProgressbar', troughcolor="#23272e", background="#00bfff", thickness=18)
+    try:
+        style.theme_use('azure-dark')
+    except Exception:
+        style.theme_use('clam')
+        style.configure('TLabel', background="#23272e", foreground="#f5f6fa", font=("Segoe UI", 11))
+        style.configure('Title.TLabel', background="#23272e", foreground="#4fd1c5", font=("Segoe UI", 14, "bold"))
+        style.configure('TButton', font=("Segoe UI", 11), padding=6, background="#353b48", foreground="#f5f6fa", borderwidth=0)
+        style.map('TButton',
+            background=[('active', '#4fd1c5'), ('!active', '#353b48')],
+            foreground=[('active', '#23272e'), ('!active', '#f5f6fa')]
+        )
+        style.configure('TProgressbar', troughcolor="#23272e", background="#4fd1c5", thickness=18)
     ttk.Label(progress_root, text="Multiple Videos Compression Progress", style='Title.TLabel').pack(pady=(14, 8))
 
     # Scrollable frame setup
