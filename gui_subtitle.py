@@ -15,11 +15,26 @@ def run_subtitle_translation():
     - Runs translation with progress bar
     - Saves translated subtitle
     """
+    from tkinter import ttk
     root = tk.Tk()
     root.title("Subtitle Translation")
-    root.geometry("400x300")
+    root.geometry("420x340")
     root.attributes('-topmost', True)
+    root.configure(bg="#23272e")
     subfile_path = tk.StringVar()
+
+    # ttk style
+    style = ttk.Style(root)
+    style.theme_use('clam')
+    style.configure('TFrame', background="#23272e")
+    style.configure('TLabel', background="#23272e", foreground="#e0e0e0", font=("Segoe UI", 11))
+    style.configure('Title.TLabel', background="#23272e", foreground="#00bfff", font=("Segoe UI", 14, "bold"))
+    style.configure('TButton', font=("Segoe UI", 11), padding=6, background="#2d333b", foreground="#ffffff")
+    style.map('TButton', background=[('active', '#00bfff')], foreground=[('active', '#23272e')])
+    style.configure('TCombobox', fieldbackground="#2d333b", background="#2d333b", foreground="#e0e0e0", font=("Segoe UI", 10))
+
+    frame = ttk.Frame(root)
+    frame.pack(fill="both", expand=True, padx=10, pady=10)
 
 
     # Language codes for FFmpeg and Google Translate
@@ -43,29 +58,29 @@ def run_subtitle_translation():
     src_lang = tk.StringVar(value="en")
     tgt_lang = tk.StringVar(value="fr")
 
+
     def browse():
-        """
-        Open a file dialog for the user to select a subtitle file.
-        """
         root.lift()
         root.attributes('-topmost', True)
         subfile_path.set(filedialog.askopenfilename(title="Choose subtitle file", filetypes=[("Subtitles", "*.srt *.ass")]))
 
-    tk.Label(root, text="Choose subtitle file to translate:").pack(pady=10)
-    tk.Button(root, text="Browse Subtitles", width=20, command=browse).pack(pady=5)
-    tk.Label(root, textvariable=subfile_path).pack(pady=5)
+    ttk.Label(frame, text="Subtitle Translation", style='Title.TLabel').pack(pady=(0, 8))
+    ttk.Label(frame, text="Choose subtitle file to translate:").pack(pady=(0, 6))
+    browse_frame = ttk.Frame(frame)
+    browse_frame.pack(pady=(0, 4))
+    ttk.Button(browse_frame, text="Browse Subtitles", width=18, command=browse).pack(side="left", padx=(0, 8))
+    ttk.Label(browse_frame, textvariable=subfile_path, width=32, anchor="w").pack(side="left")
 
     # Language selection dropdowns (aesthetic and practical)
-    import tkinter.ttk as ttk
-    lang_frame = tk.Frame(root)
-    lang_frame.pack(pady=10)
-    tk.Label(lang_frame, text="From:").grid(row=0, column=0, padx=5)
-    src_combo = ttk.Combobox(lang_frame, textvariable=src_lang, width=18, state="readonly")
+    lang_frame = ttk.Frame(frame)
+    lang_frame.pack(pady=12)
+    ttk.Label(lang_frame, text="From:").grid(row=0, column=0, padx=5)
+    src_combo = ttk.Combobox(lang_frame, textvariable=src_lang, width=18, state="readonly", style='TCombobox')
     src_combo['values'] = [f"{name} ({code})" for name, code in LANGUAGES]
     src_combo.current([code for name, code in LANGUAGES].index(src_lang.get()))
     src_combo.grid(row=0, column=1, padx=5)
-    tk.Label(lang_frame, text="To:").grid(row=0, column=2, padx=5)
-    tgt_combo = ttk.Combobox(lang_frame, textvariable=tgt_lang, width=18, state="readonly")
+    ttk.Label(lang_frame, text="To:").grid(row=0, column=2, padx=5)
+    tgt_combo = ttk.Combobox(lang_frame, textvariable=tgt_lang, width=18, state="readonly", style='TCombobox')
     tgt_combo['values'] = [f"{name} ({code})" for name, code in LANGUAGES]
     tgt_combo.current([code for name, code in LANGUAGES].index(tgt_lang.get()))
     tgt_combo.grid(row=0, column=3, padx=5)
@@ -153,6 +168,6 @@ def run_subtitle_translation():
         subs.save(f"{os.path.splitext(subfile_path.get())[0]}_translated.srt", encoding='utf-8')
         root.quit()
 
-    tk.Button(root, text="OK", command=ok).pack(pady=10)
+    ttk.Button(frame, text="OK", command=ok).pack(pady=16)
     root.mainloop()
     root.destroy()

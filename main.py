@@ -8,26 +8,12 @@ def choose_usage_dialog():
     Returns:
         str: 'film_compression' or 'sub_translation' depending on user choice.
     """
+    from tkinter import ttk
     usage = None
     def set_usage(val):
-        """
-        Set the usage mode and close the window.
-        Args:
-            val (str): The selected usage mode.
-        """
         nonlocal usage
         usage = val
         root.quit()
-    root = tk.Tk()
-    root.title("Choose Usage")
-    root.geometry("300x200")
-    root.attributes('-topmost', True)
-    tk.Label(root, text="Choose how to use this script:").pack(pady=10)
-    tk.Button(root, text="Video Compression", width=20, command=lambda: set_usage("video_compression")).pack(pady=5)
-    tk.Button(root, text="Subtitle Translation", width=20, command=lambda: set_usage("sub_translation")).pack(pady=5)
-    root.mainloop()
-    root.destroy()
-    return usage
     root = tk.Tk()
     root.title("VideoCompress - Main Menu")
     root.geometry("380x220")
@@ -40,14 +26,22 @@ def choose_usage_dialog():
     x = (root.winfo_screenwidth() // 2) - (w // 2)
     y = (root.winfo_screenheight() // 2) - (h // 2)
     root.geometry(f"{w}x{h}+{x}+{y}")
-    font_title = ("Segoe UI", 15, "bold")
-    font_btn = ("Segoe UI", 12)
-    font_label = ("Segoe UI", 11)
-    tk.Label(root, text="VideoCompress", font=font_title, fg="#00bfff", bg="#23272e").pack(pady=(18, 2))
-    tk.Label(root, text="Choose how to use this script:", font=font_label, fg="#e0e0e0", bg="#23272e").pack(pady=(0, 16))
-    style = {"font": font_btn, "bg": "#2d333b", "fg": "#ffffff", "activebackground": "#00bfff", "activeforeground": "#23272e", "bd": 0, "relief": "flat"}
-    tk.Button(root, text="Video Compression", width=22, command=lambda: set_usage("video_compression"), **style).pack(pady=7)
-    tk.Button(root, text="Subtitle Translation", width=22, command=lambda: set_usage("sub_translation"), **style).pack(pady=7)
+
+    # ttk style
+    style = ttk.Style(root)
+    style.theme_use('clam')
+    style.configure('TFrame', background="#23272e")
+    style.configure('TLabel', background="#23272e", foreground="#e0e0e0", font=("Segoe UI", 11))
+    style.configure('Title.TLabel', background="#23272e", foreground="#00bfff", font=("Segoe UI", 15, "bold"))
+    style.configure('TButton', font=("Segoe UI", 12), padding=6, background="#2d333b", foreground="#ffffff")
+    style.map('TButton', background=[('active', '#00bfff')], foreground=[('active', '#23272e')])
+
+    frame = ttk.Frame(root)
+    frame.pack(fill="both", expand=True)
+    ttk.Label(frame, text="VideoCompress", style='Title.TLabel').pack(pady=(18, 2))
+    ttk.Label(frame, text="Choose how to use this script:").pack(pady=(0, 16))
+    ttk.Button(frame, text="Video Compression", width=22, command=lambda: set_usage("video_compression")).pack(pady=7)
+    ttk.Button(frame, text="Subtitle Translation", width=22, command=lambda: set_usage("sub_translation")).pack(pady=7)
     root.mainloop()
     root.destroy()
     return usage
