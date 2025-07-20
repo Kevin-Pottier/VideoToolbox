@@ -206,24 +206,28 @@ def run_video_compression():
     tk.Label(progress_root, text="Multiple Videos Compression Progress").pack(pady=10)
     bars = []
     labels = []
+    eta_labels = []
     for i, path in enumerate(file_paths):
         label = tk.Label(progress_root, text=os.path.basename(path))
         label.pack()
         bar = ttk.Progressbar(progress_root, length=400, mode='determinate', maximum=100)
         bar.pack(pady=2)
+        eta_label = tk.Label(progress_root, text="Time left: --:--")
+        eta_label.pack()
         bars.append(bar)
         labels.append(label)
+        eta_labels.append(eta_label)
     progress_root.update()
 
     # Thread-safe queue for progress updates
     progress_queues = [queue.Queue() for _ in file_paths]
 
     def compress_one(idx, path, sub_option, sub_file):
-        def gui_progress(percent):
-            progress_queues[idx].put(percent)
+        def gui_progress(percent, mins, secs):
+            progress_queues[idx].put((percent, mins, secs))
         run_compression(path, sub_option, sub_file, ext, max_size_gb, gui_progress=gui_progress)
         # Ensure bar is set to 100% at the end
-        progress_queues[idx].put(100)
+        progress_queues[idx].put((100, 0, 0))
 
     threads = []
     for idx, (path, (sub_option, sub_file)) in enumerate(zip(file_paths, subtitle_choices)):
@@ -235,17 +239,22 @@ def run_video_compression():
         for i, q in enumerate(progress_queues):
             try:
                 while True:
-                    percent = q.get_nowait()
+                    percent, mins, secs = q.get_nowait()
                     bars[i]['value'] = percent
+                    if mins is not None and secs is not None:
+                        eta_labels[i]['text'] = f"Time left: {mins:02d}:{secs:02d}"
+                    else:
+                        eta_labels[i]['text'] = "Time left: --:--"
                     progress_root.update_idletasks()
             except queue.Empty:
                 pass
         if any(t.is_alive() for t in threads):
             progress_root.after(200, update_bars)
         else:
-            # Finalize all bars to 100%
-            for bar in bars:
+            # Finalize all bars to 100% and ETA to 00:00
+            for bar, eta in zip(bars, eta_labels):
                 bar['value'] = 100
+                eta['text'] = "Time left: 00:00"
             progress_root.update_idletasks()
             tk.Label(progress_root, text="Multiple videos compression complete.", fg="green").pack(pady=10)
             progress_root.after(2000, progress_root.destroy)

@@ -189,16 +189,16 @@ def run_compression(file_path, sub_option, sub_file, ext, max_size_gb, gui_progr
                     cur_time = int(h) * 3600 + int(m) * 60 + float(s)
                     last_time = cur_time
                     percent = min(100, int(cur_time / duration * 100))
-                    if gui_progress:
-                        gui_progress(percent)
+                    elapsed = time.time() - start_time
+                    if cur_time > 0 and percent < 100:
+                        est_total = elapsed / (cur_time / duration)
+                        remaining = est_total - elapsed
+                        mins, secs = divmod(int(remaining), 60)
                     else:
-                        elapsed = time.time() - start_time
-                        if cur_time > 0 and percent < 100:
-                            est_total = elapsed / (cur_time / duration)
-                            remaining = est_total - elapsed
-                            mins, secs = divmod(int(remaining), 60)
-                        else:
-                            mins, secs = None, None
+                        mins, secs = None, None
+                    if gui_progress:
+                        gui_progress(percent, mins, secs)
+                    else:
                         progress_win.after(0, update_gui, cur_time, percent, mins, secs)
                         # CMD progress bar
                         filled_len = int(round(bar_len * cur_time / float(duration)))
@@ -209,7 +209,7 @@ def run_compression(file_path, sub_option, sub_file, ext, max_size_gb, gui_progr
         # Always set to 100% at the end
         if gui_progress:
             try:
-                gui_progress(100)
+                gui_progress(100, 0, 0)
             except Exception:
                 pass
         else:
