@@ -110,10 +110,30 @@ def run_video_compression():
         run_compression(path, sub_option, sub_file, ext, max_size_gb)
         return
 
-    # MULTIPLE FILES WORKFLOW (same as previous batch logic)
-    # Step 2: Subtitle options PER VIDEO
-    subtitle_choices = []  # List of (sub_option, sub_file) per video
-    for path in file_paths:
+    # MULTIPLE FILES WORKFLOW (improved subtitle selection)
+    # Step 2: Ask which videos need subtitles (checkbox list)
+    subtitle_choices = [None] * len(file_paths)
+    checklist_root = tk.Tk()
+    checklist_root.title("Select Videos for Subtitles")
+    checklist_root.geometry("500x400")
+    checklist_root.attributes('-topmost', True)
+    need_subs = [tk.BooleanVar(master=checklist_root, value=False) for _ in file_paths]
+    tk.Label(checklist_root, text="Select which videos need subtitles:", font=("Segoe UI", 12, "bold")).pack(pady=10)
+    frame = tk.Frame(checklist_root)
+    frame.pack(fill="both", expand=True)
+    for i, path in enumerate(file_paths):
+        tk.Checkbutton(frame, text=os.path.basename(path), variable=need_subs[i], anchor="w").pack(fill="x", padx=30, pady=2)
+    def ok():
+        checklist_root.quit()
+    tk.Button(checklist_root, text="OK", command=ok, font=("Segoe UI", 11)).pack(pady=12)
+    checklist_root.mainloop()
+    checklist_root.destroy()
+
+    # Step 3: For checked videos, prompt for subtitle options; unchecked = none
+    for i, path in enumerate(file_paths):
+        if not need_subs[i].get():
+            subtitle_choices[i] = ("none", None)
+            continue
         sub_option = None
         sub_file = None
         while sub_option is None or (sub_option in ("soft", "hard") and not sub_file):
@@ -151,7 +171,7 @@ def run_video_compression():
                 msg_root.withdraw()
                 messagebox.showerror("Subtitle Error", "You selected a subtitle option but did not choose a subtitle file. Please choose a subtitle file.", parent=msg_root)
                 msg_root.destroy()
-        subtitle_choices.append((sub_option, sub_file))
+        subtitle_choices[i] = (sub_option, sub_file)
 
     # Step 3: Output container (reuse logic)
     container_root = tk.Tk()
@@ -198,22 +218,43 @@ def run_video_compression():
     import queue
     from tkinter import ttk
 
-    # GUI window for batch progress
+    # GUI window for batch progress with scrollbar
     progress_root = tk.Tk()
     progress_root.title("Multiple Videos Compression Progress")
-    progress_root.geometry(f"500x{100+40*len(file_paths)}")
+    w, h = 540, 420
+    x = (progress_root.winfo_screenwidth() // 2) - (w // 2)
+    y = (progress_root.winfo_screenheight() // 2) - (h // 2)
+    progress_root.geometry(f"{w}x{h}+{x}+{y}")
     progress_root.attributes('-topmost', True)
-    tk.Label(progress_root, text="Multiple Videos Compression Progress").pack(pady=10)
+    progress_root.configure(bg="#23272e")
+    tk.Label(progress_root, text="Multiple Videos Compression Progress", font=("Segoe UI", 14, "bold"), fg="#00bfff", bg="#23272e").pack(pady=(14, 8))
+
+    # Scrollable frame setup
+    canvas = tk.Canvas(progress_root, bg="#23272e", highlightthickness=0, width=w-20, height=h-80)
+    scrollbar = tk.Scrollbar(progress_root, orient="vertical", command=canvas.yview)
+    scroll_frame = tk.Frame(canvas, bg="#23272e")
+    scroll_frame_id = canvas.create_window((0, 0), window=scroll_frame, anchor="nw")
+    canvas.configure(yscrollcommand=scrollbar.set)
+    canvas.pack(side="left", fill="both", expand=True, padx=(10,0), pady=(0,10))
+    scrollbar.pack(side="right", fill="y", pady=(0,10))
+
+    def on_frame_configure(event):
+        canvas.configure(scrollregion=canvas.bbox("all"))
+    scroll_frame.bind("<Configure>", on_frame_configure)
+
     bars = []
     labels = []
     eta_labels = []
+    font_label = ("Segoe UI", 11)
+    font_eta = ("Segoe UI", 10, "italic")
+    style = {"font": font_label, "bg": "#23272e", "fg": "#00bfff"}
     for i, path in enumerate(file_paths):
-        label = tk.Label(progress_root, text=os.path.basename(path))
-        label.pack()
-        bar = ttk.Progressbar(progress_root, length=400, mode='determinate', maximum=100)
-        bar.pack(pady=2)
-        eta_label = tk.Label(progress_root, text="Time left: --:--")
-        eta_label.pack()
+        label = tk.Label(scroll_frame, text=os.path.basename(path), **style)
+        label.pack(pady=(8, 0), anchor="w")
+        bar = ttk.Progressbar(scroll_frame, length=400, mode='determinate', maximum=100)
+        bar.pack(pady=(2, 0), anchor="w")
+        eta_label = tk.Label(scroll_frame, text="Time left: --:--", font=font_eta, fg="#e0e0e0", bg="#23272e")
+        eta_label.pack(pady=(0, 2), anchor="w")
         bars.append(bar)
         labels.append(label)
         eta_labels.append(eta_label)

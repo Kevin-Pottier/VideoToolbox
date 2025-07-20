@@ -28,6 +28,29 @@ def choose_usage_dialog():
     root.mainloop()
     root.destroy()
     return usage
+    root = tk.Tk()
+    root.title("VideoCompress - Main Menu")
+    root.geometry("380x220")
+    root.configure(bg="#23272e")
+    root.attributes('-topmost', True)
+    # Center window
+    root.update_idletasks()
+    w = 380
+    h = 220
+    x = (root.winfo_screenwidth() // 2) - (w // 2)
+    y = (root.winfo_screenheight() // 2) - (h // 2)
+    root.geometry(f"{w}x{h}+{x}+{y}")
+    font_title = ("Segoe UI", 15, "bold")
+    font_btn = ("Segoe UI", 12)
+    font_label = ("Segoe UI", 11)
+    tk.Label(root, text="VideoCompress", font=font_title, fg="#00bfff", bg="#23272e").pack(pady=(18, 2))
+    tk.Label(root, text="Choose how to use this script:", font=font_label, fg="#e0e0e0", bg="#23272e").pack(pady=(0, 16))
+    style = {"font": font_btn, "bg": "#2d333b", "fg": "#ffffff", "activebackground": "#00bfff", "activeforeground": "#23272e", "bd": 0, "relief": "flat"}
+    tk.Button(root, text="Video Compression", width=22, command=lambda: set_usage("video_compression"), **style).pack(pady=7)
+    tk.Button(root, text="Subtitle Translation", width=22, command=lambda: set_usage("sub_translation"), **style).pack(pady=7)
+    root.mainloop()
+    root.destroy()
+    return usage
 
 def main():
     """
