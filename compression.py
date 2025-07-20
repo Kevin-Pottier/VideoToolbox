@@ -125,6 +125,7 @@ def run_compression(file_path, sub_option, sub_file, ext, max_size_gb, gui_progr
             style.theme_use('azure-dark')
         except Exception:
             style.theme_use('clam')
+            style.configure('TFrame', background="#23272e")
             style.configure('TLabel', background="#23272e", foreground="#f5f6fa", font=("Segoe UI", 11))
             style.configure('Title.TLabel', background="#23272e", foreground="#4fd1c5", font=("Segoe UI", 13, "bold"))
             style.configure('TButton', font=("Segoe UI", 11), padding=6, background="#353b48", foreground="#f5f6fa", borderwidth=0)
