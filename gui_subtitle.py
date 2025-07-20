@@ -1,3 +1,4 @@
+
 import tkinter as tk
 from tkinter import filedialog, messagebox
 from colorama import Fore, Style
@@ -5,6 +6,8 @@ import os
 import pysrt
 from deep_translator import GoogleTranslator
 import concurrent.futures
+# Import reusable GUI helpers for modern, DRY window/dialog creation
+from gui_helpers import apply_modern_theme, create_styled_frame, create_styled_label, create_styled_button
 
 
 def run_subtitle_translation():
@@ -15,31 +18,19 @@ def run_subtitle_translation():
     - Runs translation with progress bar
     - Saves translated subtitle
     """
+
     from tkinter import ttk
     root = tk.Tk()
     root.title("Subtitle Translation")
     root.geometry("420x340")
     root.attributes('-topmost', True)
-    root.configure(bg="#23272e")
-    subfile_path = tk.StringVar()
-
-    # Try to use a modern ttk theme (azure-dark if available), else fallback to clam with improved colors
+    # Apply modern theme and palette using helper
     style = ttk.Style(root)
-    try:
-        style.theme_use('azure-dark')
-    except Exception:
-        style.theme_use('clam')
-        style.configure('TFrame', background="#23272e")
-        style.configure('TLabel', background="#23272e", foreground="#f5f6fa", font=("Segoe UI", 11))
-        style.configure('Title.TLabel', background="#23272e", foreground="#4fd1c5", font=("Segoe UI", 14, "bold"))
-        style.configure('TButton', font=("Segoe UI", 11), padding=6, background="#353b48", foreground="#f5f6fa", borderwidth=0)
-        style.map('TButton',
-            background=[('active', '#4fd1c5'), ('!active', '#353b48')],
-            foreground=[('active', '#23272e'), ('!active', '#f5f6fa')]
-        )
-        style.configure('TCombobox', fieldbackground="#353b48", background="#353b48", foreground="#f5f6fa", font=("Segoe UI", 10))
-
-    frame = ttk.Frame(root)
+    apply_modern_theme(root, style)
+    # Override TCombobox foreground color to red for text inside dropdowns
+    style.configure('TCombobox', foreground='red')
+    subfile_path = tk.StringVar()
+    frame = create_styled_frame(root)
     frame.pack(fill="both", expand=True, padx=10, pady=10)
 
 
@@ -65,27 +56,30 @@ def run_subtitle_translation():
     tgt_lang = tk.StringVar(value="fr")
 
 
+
     def browse():
         root.lift()
         root.attributes('-topmost', True)
         subfile_path.set(filedialog.askopenfilename(title="Choose subtitle file", filetypes=[("Subtitles", "*.srt *.ass")]))
 
-    ttk.Label(frame, text="Subtitle Translation", style='Title.TLabel').pack(pady=(0, 8))
-    ttk.Label(frame, text="Choose subtitle file to translate:").pack(pady=(0, 6))
-    browse_frame = ttk.Frame(frame)
+    create_styled_label(frame, text="Subtitle Translation", style='Title.TLabel').pack(pady=(0, 8))
+    create_styled_label(frame, text="Choose subtitle file to translate:").pack(pady=(0, 6))
+    browse_frame = create_styled_frame(frame)
     browse_frame.pack(pady=(0, 4))
-    ttk.Button(browse_frame, text="Browse Subtitles", width=18, command=browse).pack(side="left", padx=(0, 8))
-    ttk.Label(browse_frame, textvariable=subfile_path, width=32, anchor="w").pack(side="left")
+    from main import create_styled_button  # Import here to avoid circular import issues
+    create_styled_button(browse_frame, text="Browse Subtitles", width=18, command=browse).pack(side="left", padx=(0, 8))
+    create_styled_label(browse_frame, "", textvariable=subfile_path, width=32, anchor="w").pack(side="left")
 
     # Language selection dropdowns (aesthetic and practical)
-    lang_frame = ttk.Frame(frame)
+
+    lang_frame = create_styled_frame(frame)
     lang_frame.pack(pady=12)
-    ttk.Label(lang_frame, text="From:").grid(row=0, column=0, padx=5)
+    create_styled_label(lang_frame, text="From:").grid(row=0, column=0, padx=5)
     src_combo = ttk.Combobox(lang_frame, textvariable=src_lang, width=18, state="readonly", style='TCombobox')
     src_combo['values'] = [f"{name} ({code})" for name, code in LANGUAGES]
     src_combo.current([code for name, code in LANGUAGES].index(src_lang.get()))
     src_combo.grid(row=0, column=1, padx=5)
-    ttk.Label(lang_frame, text="To:").grid(row=0, column=2, padx=5)
+    create_styled_label(lang_frame, text="To:").grid(row=0, column=2, padx=5)
     tgt_combo = ttk.Combobox(lang_frame, textvariable=tgt_lang, width=18, state="readonly", style='TCombobox')
     tgt_combo['values'] = [f"{name} ({code})" for name, code in LANGUAGES]
     tgt_combo.current([code for name, code in LANGUAGES].index(tgt_lang.get()))
@@ -174,6 +168,6 @@ def run_subtitle_translation():
         subs.save(f"{os.path.splitext(subfile_path.get())[0]}_translated.srt", encoding='utf-8')
         root.quit()
 
-    ttk.Button(frame, text="OK", command=ok).pack(pady=16)
+    create_styled_button(frame, text="OK", command=ok).pack(pady=16)
     root.mainloop()
     root.destroy()

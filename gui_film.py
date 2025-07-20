@@ -5,6 +5,38 @@ from colorama import Fore, Style
 import os
 from compression import run_compression
 
+def apply_modern_theme(root):
+    from tkinter import ttk
+    style = ttk.Style(root)
+    try:
+        style.theme_use('azure-dark')
+    except Exception:
+        style.theme_use('clam')
+        style.configure('TFrame', background="#23272e")
+        style.configure('TLabel', background="#23272e", foreground="#f5f6fa", font=("Segoe UI", 11))
+        style.configure('Title.TLabel', background="#23272e", foreground="#4fd1c5", font=("Segoe UI", 15, "bold"))
+        style.configure('TButton', font=("Segoe UI", 12), padding=6, background="#353b48", foreground="#f5f6fa", borderwidth=0)
+        style.map('TButton',
+            background=[('active', '#4fd1c5'), ('!active', '#353b48')],
+            foreground=[('active', '#23272e'), ('!active', '#f5f6fa')]
+        )
+        style.configure('TCheckbutton', background="#23272e", foreground="#f5f6fa", font=("Segoe UI", 10))
+        style.configure('TRadiobutton', background="#23272e", foreground="#f5f6fa", font=("Segoe UI", 10))
+        style.configure('TProgressbar', troughcolor="#23272e", background="#4fd1c5", thickness=18)
+    return style
+
+def create_styled_frame(root):
+    from tkinter import ttk
+    return ttk.Frame(root, style='TFrame')
+
+def create_styled_label(parent, text, style='TLabel', **kwargs):
+    from tkinter import ttk
+    return ttk.Label(parent, text=text, style=style, background="#23272e", **kwargs)
+
+def create_styled_button(parent, text, command, width=None):
+    from tkinter import ttk
+    return ttk.Button(parent, text=text, command=command, width=width, style='TButton')
+
 def run_video_compression():
     """
     Unified GUI workflow for compressing one or more video files with optional subtitle handling.
@@ -38,39 +70,27 @@ def run_video_compression():
             sub_root.title(f"Subtitle Options for {os.path.basename(path)}")
             sub_root.geometry("400x300")
             sub_root.configure(bg="#23272e")
-            style = ttk.Style(sub_root)
-            try:
-                style.theme_use('azure-dark')
-            except Exception:
-                style.theme_use('clam')
-                style.configure('TFrame', background="#23272e")
-                style.configure('TLabel', background="#23272e", foreground="#f5f6fa", font=("Segoe UI", 11))
-                style.configure('TRadiobutton', background="#23272e", foreground="#f5f6fa", font=("Segoe UI", 10))
-                style.configure('TButton', font=("Segoe UI", 11), padding=6, background="#353b48", foreground="#f5f6fa", borderwidth=0)
-                style.map('TButton',
-                    background=[('active', '#4fd1c5'), ('!active', '#353b48')],
-                    foreground=[('active', '#23272e'), ('!active', "#f5f6fa")]
-                )
-            frame = ttk.Frame(sub_root)
+            apply_modern_theme(sub_root)
+            frame = create_styled_frame(sub_root)
             frame.pack(fill="both", expand=True, padx=10, pady=10)
-            ttk.Label(frame, text=f"Subtitle options for:\n{os.path.basename(path)}").pack(pady=5)
+            create_styled_label(frame, f"Subtitle options for:\n{os.path.basename(path)}").pack(pady=5)
             def toggle_sub():
                 if sub_option_var.get() == "none":
                     sub_btn.state(["disabled"])
                     sub_file_var.set("")
                 else:
                     sub_btn.state(["!disabled"])
-            ttk.Radiobutton(frame, text="No subtitles", variable=sub_option_var, value="none", command=toggle_sub).pack(anchor="w", padx=40)
-            ttk.Radiobutton(frame, text="Softcode (attach .srt)", variable=sub_option_var, value="soft", command=toggle_sub).pack(anchor="w", padx=40)
-            ttk.Radiobutton(frame, text="Hardcode (burn in)", variable=sub_option_var, value="hard", command=toggle_sub).pack(anchor="w", padx=40)
-            sub_btn = ttk.Button(frame, text="Choose Subtitle File", command=lambda: sub_file_var.set(filedialog.askopenfilename(title="Choose subtitle file", filetypes=[("Subtitles", "*.srt *.ass")]) or sub_file_var.get()))
+            ttk.Radiobutton(frame, text="No subtitles", variable=sub_option_var, value="none", command=toggle_sub, style='TRadiobutton').pack(anchor="w", padx=40)
+            ttk.Radiobutton(frame, text="Softcode (attach .srt)", variable=sub_option_var, value="soft", command=toggle_sub, style='TRadiobutton').pack(anchor="w", padx=40)
+            ttk.Radiobutton(frame, text="Hardcode (burn in)", variable=sub_option_var, value="hard", command=toggle_sub, style='TRadiobutton').pack(anchor="w", padx=40)
+            sub_btn = create_styled_button(frame, "Choose Subtitle File", lambda: sub_file_var.set(filedialog.askopenfilename(title="Choose subtitle file", filetypes=[("Subtitles", "*.srt *.ass")]) or sub_file_var.get()))
             sub_btn.pack(pady=5)
             sub_btn.state(["disabled"])
-            sub_label = ttk.Label(frame, textvariable=sub_file_var)
+            sub_label = create_styled_label(frame, "", textvariable=sub_file_var)
             sub_label.pack(pady=5)
             def ok():
                 sub_root.quit()
-            ttk.Button(frame, text="OK", command=ok).pack(pady=10)
+            create_styled_button(frame, "OK", ok).pack(pady=10)
             sub_root.after(100, toggle_sub)
             sub_root.mainloop()
             sub_option = sub_option_var.get()
@@ -96,23 +116,12 @@ def run_video_compression():
         container_win.geometry("300x150")
         container_win.attributes('-topmost', True)
         container_win.configure(bg="#23272e")
-        style = ttk.Style(container_win)
-        try:
-            style.theme_use('azure-dark')
-        except Exception:
-            style.theme_use('clam')
-            style.configure('TFrame', background="#23272e")
-            style.configure('TLabel', background="#23272e", foreground="#f5f6fa", font=("Segoe UI", 11))
-            style.configure('TButton', font=("Segoe UI", 11), padding=6, background="#353b48", foreground="#f5f6fa", borderwidth=0)
-            style.map('TButton',
-                background=[('active', '#4fd1c5'), ('!active', '#353b48')],
-                foreground=[('active', '#23272e'), ('!active', '#f5f6fa')]
-            )
-        frame = ttk.Frame(container_win)
+        apply_modern_theme(container_win)
+        frame = create_styled_frame(container_win)
         frame.pack(fill="both", expand=True, padx=10, pady=10)
-        ttk.Label(frame, text="Choose the output container:").pack(pady=10)
-        ttk.Button(frame, text="MP4", width=15, command=lambda: set_choice("mp4")).pack(pady=5)
-        ttk.Button(frame, text="MKV", width=15, command=lambda: set_choice("mkv")).pack(pady=5)
+        create_styled_label(frame, "Choose the output container:").pack(pady=10)
+        create_styled_button(frame, "MP4", lambda: set_choice("mp4"), width=15).pack(pady=5)
+        create_styled_button(frame, "MKV", lambda: set_choice("mkv"), width=15).pack(pady=5)
         container_win.protocol("WM_DELETE_WINDOW", container_root.quit)
         container_root.mainloop()
         ext = container_choice.get()
@@ -151,28 +160,16 @@ def run_video_compression():
     checklist_root.geometry("500x400")
     checklist_root.attributes('-topmost', True)
     checklist_root.configure(bg="#23272e")
-    style = ttk.Style(checklist_root)
-    try:
-        style.theme_use('azure-dark')
-    except Exception:
-        style.theme_use('clam')
-        style.configure('TFrame', background="#23272e")
-        style.configure('TLabel', background="#23272e", foreground="#f5f6fa", font=("Segoe UI", 12, "bold"))
-        style.configure('TCheckbutton', background="#23272e", foreground="#f5f6fa", font=("Segoe UI", 10))
-        style.configure('TButton', font=("Segoe UI", 11), padding=6, background="#353b48", foreground="#f5f6fa", borderwidth=0)
-        style.map('TButton',
-            background=[('active', '#4fd1c5'), ('!active', '#353b48')],
-            foreground=[('active', '#23272e'), ('!active', '#f5f6fa')]
-        )
+    apply_modern_theme(checklist_root)
     need_subs = [tk.BooleanVar(master=checklist_root, value=False) for _ in file_paths]
-    ttk.Label(checklist_root, text="Select which videos need subtitles:").pack(pady=10)
-    frame = ttk.Frame(checklist_root)
+    create_styled_label(checklist_root, "Select which videos need subtitles:", style='TLabel').pack(pady=10)
+    frame = create_styled_frame(checklist_root)
     frame.pack(fill="both", expand=True)
     for i, path in enumerate(file_paths):
         ttk.Checkbutton(frame, text=os.path.basename(path), variable=need_subs[i], style='TCheckbutton').pack(fill="x", padx=30, pady=2)
     def ok():
         checklist_root.quit()
-    ttk.Button(checklist_root, text="OK", command=ok).pack(pady=12)
+    create_styled_button(checklist_root, "OK", ok).pack(pady=12)
     checklist_root.mainloop()
     checklist_root.destroy()
 
@@ -191,39 +188,27 @@ def run_video_compression():
             sub_root.title(f"Subtitle Options for {os.path.basename(path)}")
             sub_root.geometry("400x300")
             sub_root.configure(bg="#23272e")
-            style = ttk.Style(sub_root)
-            try:
-                style.theme_use('azure-dark')
-            except Exception:
-                style.theme_use('clam')
-                style.configure('TFrame', background="#23272e")
-                style.configure('TLabel', background="#23272e", foreground="#f5f6fa", font=("Segoe UI", 11))
-                style.configure('TRadiobutton', background="#23272e", foreground="#f5f6fa", font=("Segoe UI", 10))
-                style.configure('TButton', font=("Segoe UI", 11), padding=6, background="#353b48", foreground="#f5f6fa", borderwidth=0)
-                style.map('TButton',
-                    background=[('active', '#4fd1c5'), ('!active', '#353b48')],
-                    foreground=[('active', '#23272e'), ('!active', '#f5f6fa')]
-                )
-            frame = ttk.Frame(sub_root)
+            apply_modern_theme(sub_root)
+            frame = create_styled_frame(sub_root)
             frame.pack(fill="both", expand=True, padx=10, pady=10)
-            ttk.Label(frame, text=f"Subtitle options for:\n{os.path.basename(path)}").pack(pady=5)
+            create_styled_label(frame, f"Subtitle options for:\n{os.path.basename(path)}").pack(pady=5)
             def toggle_sub():
                 if sub_option_var.get() == "none":
                     sub_btn.state(["disabled"])
                     sub_file_var.set("")
                 else:
                     sub_btn.state(["!disabled"])
-            ttk.Radiobutton(frame, text="No subtitles", variable=sub_option_var, value="none", command=toggle_sub).pack(anchor="w", padx=40)
-            ttk.Radiobutton(frame, text="Softcode (attach .srt)", variable=sub_option_var, value="soft", command=toggle_sub).pack(anchor="w", padx=40)
-            ttk.Radiobutton(frame, text="Hardcode (burn in)", variable=sub_option_var, value="hard", command=toggle_sub).pack(anchor="w", padx=40)
-            sub_btn = ttk.Button(frame, text="Choose Subtitle File", command=lambda: sub_file_var.set(filedialog.askopenfilename(title="Choose subtitle file", filetypes=[("Subtitles", "*.srt *.ass")]) or sub_file_var.get()))
+            ttk.Radiobutton(frame, text="No subtitles", variable=sub_option_var, value="none", command=toggle_sub, style='TRadiobutton').pack(anchor="w", padx=40)
+            ttk.Radiobutton(frame, text="Softcode (attach .srt)", variable=sub_option_var, value="soft", command=toggle_sub, style='TRadiobutton').pack(anchor="w", padx=40)
+            ttk.Radiobutton(frame, text="Hardcode (burn in)", variable=sub_option_var, value="hard", command=toggle_sub, style='TRadiobutton').pack(anchor="w", padx=40)
+            sub_btn = create_styled_button(frame, "Choose Subtitle File", lambda: sub_file_var.set(filedialog.askopenfilename(title="Choose subtitle file", filetypes=[("Subtitles", "*.srt *.ass")]) or sub_file_var.get()))
             sub_btn.pack(pady=5)
             sub_btn.state(["disabled"])
-            sub_label = ttk.Label(frame, textvariable=sub_file_var)
+            sub_label = create_styled_label(frame, "", textvariable=sub_file_var)
             sub_label.pack(pady=5)
             def ok():
                 sub_root.quit()
-            ttk.Button(frame, text="OK", command=ok).pack(pady=10)
+            create_styled_button(frame, "OK", ok).pack(pady=10)
             sub_root.after(100, toggle_sub)
             sub_root.mainloop()
             sub_option = sub_option_var.get()
@@ -250,23 +235,12 @@ def run_video_compression():
     container_win.geometry("300x150")
     container_win.attributes('-topmost', True)
     container_win.configure(bg="#23272e")
-    style = ttk.Style(container_win)
-    try:
-        style.theme_use('azure-dark')
-    except Exception:
-        style.theme_use('clam')
-        style.configure('TFrame', background="#23272e")
-        style.configure('TLabel', background="#23272e", foreground="#f5f6fa", font=("Segoe UI", 11))
-        style.configure('TButton', font=("Segoe UI", 11), padding=6, background="#353b48", foreground="#f5f6fa", borderwidth=0)
-        style.map('TButton',
-            background=[('active', '#4fd1c5'), ('!active', '#353b48')],
-            foreground=[('active', '#23272e'), ('!active', '#f5f6fa')]
-        )
-    frame = ttk.Frame(container_win)
+    apply_modern_theme(container_win)
+    frame = create_styled_frame(container_win)
     frame.pack(fill="both", expand=True, padx=10, pady=10)
-    ttk.Label(frame, text="Choose the output container (applies to all):").pack(pady=10)
-    ttk.Button(frame, text="MP4", width=15, command=lambda: set_choice("mp4")).pack(pady=5)
-    ttk.Button(frame, text="MKV", width=15, command=lambda: set_choice("mkv")).pack(pady=5)
+    create_styled_label(frame, "Choose the output container (applies to all):").pack(pady=10)
+    create_styled_button(frame, "MP4", lambda: set_choice("mp4"), width=15).pack(pady=5)
+    create_styled_button(frame, "MKV", lambda: set_choice("mkv"), width=15).pack(pady=5)
     container_win.protocol("WM_DELETE_WINDOW", container_root.quit)
     container_root.mainloop()
     ext = container_choice.get()
@@ -306,26 +280,13 @@ def run_video_compression():
     progress_root.geometry(f"{w}x{h}+{x}+{y}")
     progress_root.attributes('-topmost', True)
     progress_root.configure(bg="#23272e")
-    style = ttk.Style(progress_root)
-    try:
-        style.theme_use('azure-dark')
-    except Exception:
-        style.theme_use('clam')
-        style.configure('TFrame', background="#23272e")
-        style.configure('TLabel', background="#23272e", foreground="#f5f6fa", font=("Segoe UI", 11))
-        style.configure('Title.TLabel', background="#23272e", foreground="#4fd1c5", font=("Segoe UI", 14, "bold"))
-        style.configure('TButton', font=("Segoe UI", 11), padding=6, background="#353b48", foreground="#f5f6fa", borderwidth=0)
-        style.map('TButton',
-            background=[('active', '#4fd1c5'), ('!active', '#353b48')],
-            foreground=[('active', '#23272e'), ('!active', '#f5f6fa')]
-        )
-        style.configure('TProgressbar', troughcolor="#23272e", background="#4fd1c5", thickness=18)
-    ttk.Label(progress_root, text="Multiple Videos Compression Progress", style='Title.TLabel').pack(pady=(14, 8))
+    apply_modern_theme(progress_root)
+    create_styled_label(progress_root, "Multiple Videos Compression Progress", style='Title.TLabel').pack(pady=(14, 8))
 
     # Scrollable frame setup
     canvas = tk.Canvas(progress_root, bg="#23272e", highlightthickness=0, width=w-20, height=h-80)
     scrollbar = ttk.Scrollbar(progress_root, orient="vertical", command=canvas.yview)
-    scroll_frame = ttk.Frame(canvas, style='TFrame')
+    scroll_frame = create_styled_frame(canvas)
     scroll_frame_id = canvas.create_window((0, 0), window=scroll_frame, anchor="nw")
     canvas.configure(yscrollcommand=scrollbar.set)
     canvas.pack(side="left", fill="both", expand=True, padx=(10,0), pady=(0,10))
@@ -339,11 +300,11 @@ def run_video_compression():
     labels = []
     eta_labels = []
     for i, path in enumerate(file_paths):
-        label = ttk.Label(scroll_frame, text=os.path.basename(path), style='TLabel')
+        label = create_styled_label(scroll_frame, os.path.basename(path))
         label.pack(pady=(8, 0), anchor="w")
         bar = ttk.Progressbar(scroll_frame, length=400, mode='determinate', maximum=100, style='TProgressbar')
         bar.pack(pady=(2, 0), anchor="w")
-        eta_label = ttk.Label(scroll_frame, text="Time left: --:--", style='TLabel', font=("Segoe UI", 10, "italic"))
+        eta_label = create_styled_label(scroll_frame, "Time left: --:--", font=("Segoe UI", 10, "italic"))
         eta_label.pack(pady=(0, 2), anchor="w")
         bars.append(bar)
         labels.append(label)
@@ -387,7 +348,7 @@ def run_video_compression():
                 bar['value'] = 100
                 eta['text'] = "Time left: 00:00"
             progress_root.update_idletasks()
-            ttk.Label(progress_root, text="Multiple videos compression complete.", foreground="green").pack(pady=10)
+            create_styled_label(progress_root, "Multiple videos compression complete.", style='TLabel', foreground="green").pack(pady=10)
             progress_root.after(2000, progress_root.destroy)
 
     update_bars()
