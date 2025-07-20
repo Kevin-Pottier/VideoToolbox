@@ -1,7 +1,10 @@
 
+
 # Required for colored terminal output
 colorama
 # Required for reading/writing subtitle files
 pysrt
 # Required for Google Translate API (subtitle translation)
 deep-translator
+# Standard library, but required for GUI
+tkinter
