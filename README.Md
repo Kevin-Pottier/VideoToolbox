@@ -2,10 +2,11 @@
 
 # VideoCompress
 
-Modern, user-friendly Python GUI for compressing one or multiple video files and translating subtitles, with per-file progress, ETA, advanced batch features, and a fast, responsive, multi-threaded subtitle translation workflow with GUI progress bar.
+Modern, user-friendly Python GUI for compressing or upscaling one or multiple video files and translating subtitles, with per-file progress, ETA, advanced batch features, and a fast, responsive, multi-threaded subtitle translation workflow with GUI progress bar. Now includes Real-ESRGAN integration for high-quality video upscaling.
 
 ## Features
-- Unified video compression: select one or multiple videos, all in one workflow.
+- Unified video compression and upscaling: select one or multiple videos, all in one workflow.
+- **Real-ESRGAN upscaling**: upscale videos to higher resolutions using state-of-the-art AI (Real-ESRGAN). Choose upscaling factor and model.
 - Batch mode: see all progress bars in a scrollable window, with per-file ETA.
 - Modern UI: clean, dark-themed interface, clear fonts, colors, and spacing.
 - Subtitle handling: for each video, choose to ignore, softcode, or hardcode subtitles.
@@ -16,6 +17,8 @@ Modern, user-friendly Python GUI for compressing one or multiple video files and
 ## Requirements
 - Python 3.8+
 - FFmpeg and FFprobe installed and available in your system PATH
+- Real-ESRGAN (Python version) and its dependencies (see `extern/Real-ESRGAN/requirements.txt`)
+- Pretrained Real-ESRGAN weights (see `weights/` folder)
 - Python packages listed in `requirements.txt`:
   - `colorama` (for colored terminal output)
   - `pysrt` (for reading/writing subtitle files)
@@ -23,19 +26,31 @@ Modern, user-friendly Python GUI for compressing one or multiple video files and
   - `tkinter` (standard library)
 
 ## Usage
+0. Clone the repo using: 
+   ```bash
+   git clone --recurse-submodules https://github.com/Kevin-Pottier/VideoCompress.git
+   ```
 1. Install requirements:
    `pip install -r requirements.txt`
 2. Install FFmpeg and make sure it is in your system PATH.
-3. Run the app:
+3. (Optional, for upscaling) Install Real-ESRGAN dependencies:
+   `pip install -r extern/Real-ESRGAN/requirements.txt`
+   - Download or place the required Real-ESRGAN model weights in the `weights/` folder (see `extern/Real-ESRGAN/README.md` for details).
+4. Run the app:
    `python main.py`
-4. Choose a mode:
+5. Choose a mode:
    - **Video Compression**: Select one or more videos, configure subtitles, output format, and size. Batch mode shows a scrollable window with per-file progress and ETA.
+   - **Video Upscaling (Real-ESRGAN)**: Select one or more videos to upscale. Choose upscaling factor (e.g., 2x, 4x) and model. Progress bars and ETA are shown for each file. Output is saved in the selected folder.
    - **Subtitle Translation**: Translate a subtitle file between languages. The translation is fast (multi-threaded), the GUI remains responsive, and a progress bar shows real-time status. When finished, a message box confirms completion and the window closes automatically.
 
 ## Major Changes
 - Unified single and batch video compression into one workflow.
+- **Added Real-ESRGAN video upscaling:**
+  - Seamless integration of Real-ESRGAN for high-quality video upscaling.
+  - Select upscaling factor and model from the GUI.
+  - Batch upscaling with per-file progress and ETA.
 - Modernized all GUIs (fonts, colors, spacing, centering).
-- Added scrollable progress window for batch compression.
+- Added scrollable progress window for batch compression and upscaling.
 - Improved subtitle workflow: select which videos need subtitles before configuring options.
 - Per-file progress bars and ETA in batch mode.
 - Robust error handling and user feedback throughout.
@@ -79,6 +94,10 @@ You can create a standalone `.exe` for easy sharing and use on Windows:
   - Real-time progress bar in the GUI (not just command line).
   - Output saved as `_translated.srt`.
   - GUI remains responsive during translation, and a completion message is shown when done.
+- **Real-ESRGAN upscaling added:**
+  - Videos can now be upscaled to higher resolutions using Real-ESRGAN directly from the GUI.
+  - Batch upscaling supported with per-file progress and ETA.
+  - Easy model/scale selection and output management.
 - Requirements updated: now uses `colorama`, `pysrt`, and `deep-translator`.
 - `.gitignore` and documentation updated to reflect new modular structure and ignored files.
 
