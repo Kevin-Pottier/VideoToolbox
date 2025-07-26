@@ -1,3 +1,4 @@
+import subprocess
 import tkinter as tk
 from tkinter import filedialog, messagebox
 import os
@@ -94,6 +95,42 @@ def run_video_upscale_gui():
         return
     # Recap display (print)
     print("--- Upscale jobs to perform ---")
+    
+    if ensure_realesrgan_weights():
+        print("Real-ESRGAN model is ready.")
+    else:
+        messagebox.showerror("Error", "Real-ESRGAN model not found. Please download it to the 'weights' folder.")
+        return
+    
     for filepath, (w, h) in upscale_jobs:
         print(f"{os.path.basename(filepath)} : {w}x{h} => output folder: {outdir}")
     messagebox.showinfo("Simulation", "Upscaling would be launched here (see console for details).")
+
+
+def ensure_realesrgan_weights(weights_dir="weights", model_name="RealESRGAN_x4plus.pth"):
+    """
+    Checks if the Real-ESRGAN model file is present in the weights directory.
+    If not, downloads it using wget.
+    Returns the path to the model file, or None if download failed.
+    """
+    if not os.path.isdir(weights_dir):
+        os.makedirs(weights_dir, exist_ok=True)
+    model_path = os.path.join(weights_dir, model_name)
+    if os.path.isfile(model_path):
+        return model_path
+    # Download the model if not present using Python (avoids wget/TLS issues)
+    url = "https://github.com/xinntao/Real-ESRGAN/releases/download/v0.1.0/RealESRGAN_x4plus.pth"
+    print(f"Model {model_name} not found in {weights_dir}. Downloading with Python...")
+    try:
+        import urllib.request
+        with urllib.request.urlopen(url) as response, open(model_path, 'wb') as out_file:
+            out_file.write(response.read())
+        if os.path.isfile(model_path):
+            print("Model downloaded successfully.")
+            return model_path
+        else:
+            print("Failed to download model: file not found after download.")
+            return None
+    except Exception as e:
+        print(f"Error downloading model: {e}")
+        return None
