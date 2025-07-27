@@ -96,12 +96,6 @@ def run_video_upscale_gui():
     # Recap display (print)
     print("--- Upscale jobs to perform ---")
     
-    if ensure_realesrgan_weights():
-        print("Real-ESRGAN model is ready.")
-    else:
-        messagebox.showerror("Error", "Real-ESRGAN model not found. Please download it to the 'weights' folder.")
-        return
-    
     for filepath, (w, h) in upscale_jobs:
         run_upscale(filepath, w, h, outdir)
     messagebox.showinfo("Done", "Upscaling process finished. See console for details.")
@@ -168,44 +162,88 @@ def run_upscale(filepath, w, h, outdir):
         print(f"[{video_name}] Frame extraction failed: {err}")
         return False
 
-    # 2. Upscale frames
-    print(f"[{video_name}] Upscaling frames with Real-ESRGAN...")
-    orig_h = get_video_resolution(filepath)[1]
-    outscale = int(h / orig_h) + 1 if orig_h else 2
-    realesrgan_script = os.path.abspath(os.path.normpath(os.path.join("extern", "Real-ESRGAN", "inference_realesrgan.py")))
+    # 2. Upscale frames using realesrgan-ncnn-vulkan.exe in batch mode with GUI progress bar
+    print(f"[{video_name}] Upscaling frames with realesrgan-ncnn-vulkan.exe (batch mode)...")
+    tool_dir = os.path.abspath(os.path.normpath(os.path.join(os.getcwd(), "Tool")))
+    exe_path = os.path.join(tool_dir, "realesrgan-ncnn-vulkan.exe")
+    if not os.path.isfile(exe_path):
+        print(f"[{video_name}] ERROR: realesrgan-ncnn-vulkan.exe not found in {tool_dir}")
+        return False
+    model_name = "realesrgan-x4plus"  # or change to another model if needed
+    # Calculate scale factor based on chosen resolution
+    orig_width, orig_height = get_video_resolution(filepath)
+    if orig_height is None or orig_height == 0:
+        scale = 2  # fallback
+    else:
+        scale = int(h / orig_height) + 1
+        if scale < 2:
+            scale = 2  # minimum supported by realesrgan
     up_cmd = [
-        "python", realesrgan_script,
-        "-n", "RealESRGAN_x4plus",
+        exe_path,
         "-i", frames_dir,
         "-o", frames_up_dir,
-        "--outscale", str(outscale)
+        "-n", model_name,
+        "-s", str(scale),
+        "-f", "jpg"
     ]
-    # Count number of frames to upscale
+    # Count input frames
     frame_files = [f for f in os.listdir(frames_dir) if f.endswith('.jpg')]
-    frame_files.sort()
     n_frames = len(frame_files)
-    if use_tqdm and n_frames:
-        print(f"[{video_name}] Progress: Upscaling {n_frames} frames...")
-        with tqdm(total=n_frames, desc="Upscaling", unit="frame") as pbar:
-            proc = subprocess.Popen(up_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-            while True:
-                line = proc.stderr.readline()
-                if not line:
-                    break
-                if "Processed" in line or "Saving" in line:
-                    pbar.update(1)
-            proc.wait()
-            pbar.n = n_frames
-            pbar.refresh()
-        res = proc
-    else:
-        res = subprocess.run(up_cmd, capture_output=True, text=True)
-    if res.returncode != 0:
-        print(f"[{video_name}] Upscale failed!")
-        print(f"Command: {' '.join(up_cmd)}")
-        print(f"stdout: {res.stdout}")
-        print(f"stderr: {res.stderr}")
-        return False
+    # --- GUI progress bar ---
+    import threading, time
+    import tkinter as tk
+    from tkinter import ttk
+    progress_root = tk.Toplevel()
+    progress_root.title(f"Upscaling {video_name}")
+    progress_root.geometry("420x120")
+    progress_label = tk.Label(progress_root, text=f"Upscaling {n_frames} frames...", font=("Segoe UI", 12))
+    progress_label.pack(pady=(18, 4))
+    progress_var = tk.DoubleVar()
+    progress_bar = ttk.Progressbar(progress_root, maximum=n_frames, length=360, variable=progress_var)
+    progress_bar.pack(pady=6)
+    eta_label = tk.Label(progress_root, text="ETA: --:--", font=("Segoe UI", 10))
+    eta_label.pack(pady=(0, 8))
+    progress_root.update()
+    # Thread to run upscaling
+    def upscale_thread():
+        start_time = time.time()
+        proc = subprocess.Popen(up_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        while True:
+            # Count output files
+            out_files = [f for f in os.listdir(frames_up_dir) if f.endswith('.jpg')]
+            done = len(out_files)
+            progress_var.set(done)
+            elapsed = time.time() - start_time
+            if done > 0:
+                rate = elapsed / done
+                eta = int(rate * (n_frames - done))
+                eta_str = time.strftime('%M:%S', time.gmtime(eta))
+            else:
+                eta_str = "--:--"
+            eta_label.config(text=f"ETA: {eta_str}")
+            progress_root.update()
+            if proc.poll() is not None:
+                # One last update
+                out_files = [f for f in os.listdir(frames_up_dir) if f.endswith('.jpg')]
+                done = len(out_files)
+                progress_var.set(done)
+                progress_root.update()
+                break
+            time.sleep(0.5)
+        # Check result
+        if proc.returncode != 0:
+            print(f"[{video_name}] Upscale failed!")
+            print(f"Command: {' '.join(up_cmd)}")
+            print(f"stdout: {proc.stdout.read() if proc.stdout else ''}")
+            print(f"stderr: {proc.stderr.read() if proc.stderr else ''}")
+            progress_root.destroy()
+            return False
+        progress_root.destroy()
+        return True
+    t = threading.Thread(target=upscale_thread)
+    t.start()
+    progress_root.mainloop()
+    t.join()
 
     # 3. Recompose video
     print(f"[{video_name}] Recomposing video...")
@@ -250,31 +288,3 @@ def run_upscale(filepath, w, h, outdir):
     print(f"[{video_name}] Upscaled video saved to {output_video}")
     return True
 
-
-def ensure_realesrgan_weights(weights_dir="extern/Real-ESRGAN/weights", model_name="RealESRGAN_x4plus.pth"):
-    """
-    Checks if the Real-ESRGAN model file is present in the weights directory.
-    If not, downloads it using wget.
-    Returns the path to the model file, or None if download failed.
-    """
-    if not os.path.isdir(weights_dir):
-        os.makedirs(weights_dir, exist_ok=True)
-    model_path = os.path.join(weights_dir, model_name)
-    if os.path.isfile(model_path):
-        return model_path
-    # Download the model if not present using Python (avoids wget/TLS issues)
-    url = "https://github.com/xinntao/Real-ESRGAN/releases/download/v0.1.0/RealESRGAN_x4plus.pth"
-    print(f"Model {model_name} not found in {weights_dir}. Downloading with Python...")
-    try:
-        import urllib.request
-        with urllib.request.urlopen(url) as response, open(model_path, 'wb') as out_file:
-            out_file.write(response.read())
-        if os.path.isfile(model_path):
-            print("Model downloaded successfully.")
-            return model_path
-        else:
-            print("Failed to download model: file not found after download.")
-            return None
-    except Exception as e:
-        print(f"Error downloading model: {e}")
-        return None
