@@ -186,6 +186,7 @@ def run_upscale(filepath, w, h, outdir):
         "-s", str(scale),
         "-f", "jpg"
     ]
+    print(f"[{video_name}] Upscale command: {' '.join(up_cmd)}")
     # Count input frames
     frame_files = [f for f in os.listdir(frames_dir) if f.endswith('.jpg')]
     n_frames = len(frame_files)
