@@ -103,11 +103,155 @@ def run_video_upscale_gui():
         return
     
     for filepath, (w, h) in upscale_jobs:
-        print(f"{os.path.basename(filepath)} : {w}x{h} => output folder: {outdir}")
-    messagebox.showinfo("Simulation", "Upscaling would be launched here (see console for details).")
+        run_upscale(filepath, w, h, outdir)
+    messagebox.showinfo("Done", "Upscaling process finished. See console for details.")
 
 
-def ensure_realesrgan_weights(weights_dir="weights", model_name="RealESRGAN_x4plus.pth"):
+def run_upscale(filepath, w, h, outdir):
+    """
+    Run the full upscale process for a single video: extract frames, upscale, recompose.
+    """
+    video_name = os.path.splitext(os.path.basename(filepath))[0]
+    frames_dir = os.path.abspath(os.path.normpath(os.path.join(outdir, f"frames_{video_name}")))
+    frames_up_dir = os.path.abspath(os.path.normpath(os.path.join(outdir, f"frames_upscaled_{video_name}")))
+    output_video = os.path.abspath(os.path.normpath(os.path.join(outdir, f"{video_name}_upscaled_{h}p.mp4")))
+    filepath = os.path.abspath(os.path.normpath(filepath))
+    os.makedirs(frames_dir, exist_ok=True)
+    os.makedirs(frames_up_dir, exist_ok=True)
+
+    # 1. Extract frames
+    print(f"[{video_name}] Extracting frames...")
+    try:
+        from tqdm import tqdm
+        use_tqdm = True
+    except ImportError:
+        use_tqdm = False
+
+    # Estimate number of frames using ffprobe
+    try:
+        import subprocess as sp
+        probe_cmd = [
+            "ffprobe", "-v", "error", "-select_streams", "v:0", "-count_frames",
+            "-show_entries", "stream=nb_read_frames", "-of", "default=nokey=1:noprint_wrappers=1", filepath
+        ]
+        nb_frames = int(sp.check_output(probe_cmd, stderr=sp.DEVNULL).decode().strip())
+    except Exception:
+        nb_frames = None
+
+    extract_cmd = [
+        "ffmpeg", "-i", filepath, "-qscale:v", "1",
+        os.path.join(frames_dir, "frame_%08d.jpg")
+    ]
+    if use_tqdm and nb_frames:
+        print(f"[{video_name}] Progress: Extracting {nb_frames} frames...")
+        with tqdm(total=nb_frames, desc="Extracting", unit="frame") as pbar:
+            proc = subprocess.Popen(extract_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            while True:
+                line = proc.stderr.readline()
+                if not line:
+                    break
+                if "frame=" in line:
+                    try:
+                        current = int(line.split("frame=")[-1].split()[0])
+                        pbar.n = current
+                        pbar.refresh()
+                    except Exception:
+                        pass
+            proc.wait()
+            pbar.n = nb_frames
+            pbar.refresh()
+        res = proc
+    else:
+        res = subprocess.run(extract_cmd, capture_output=True, text=True)
+    if res.returncode != 0:
+        err = res.stderr.read() if hasattr(res.stderr, 'read') else res.stderr
+        print(f"[{video_name}] Frame extraction failed: {err}")
+        return False
+
+    # 2. Upscale frames
+    print(f"[{video_name}] Upscaling frames with Real-ESRGAN...")
+    orig_h = get_video_resolution(filepath)[1]
+    outscale = int(h / orig_h) + 1 if orig_h else 2
+    realesrgan_script = os.path.abspath(os.path.normpath(os.path.join("extern", "Real-ESRGAN", "inference_realesrgan.py")))
+    up_cmd = [
+        "python", realesrgan_script,
+        "-n", "RealESRGAN_x4plus",
+        "-i", frames_dir,
+        "-o", frames_up_dir,
+        "--outscale", str(outscale)
+    ]
+    # Count number of frames to upscale
+    frame_files = [f for f in os.listdir(frames_dir) if f.endswith('.jpg')]
+    frame_files.sort()
+    n_frames = len(frame_files)
+    if use_tqdm and n_frames:
+        print(f"[{video_name}] Progress: Upscaling {n_frames} frames...")
+        with tqdm(total=n_frames, desc="Upscaling", unit="frame") as pbar:
+            proc = subprocess.Popen(up_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            while True:
+                line = proc.stderr.readline()
+                if not line:
+                    break
+                if "Processed" in line or "Saving" in line:
+                    pbar.update(1)
+            proc.wait()
+            pbar.n = n_frames
+            pbar.refresh()
+        res = proc
+    else:
+        res = subprocess.run(up_cmd, capture_output=True, text=True)
+    if res.returncode != 0:
+        print(f"[{video_name}] Upscale failed!")
+        print(f"Command: {' '.join(up_cmd)}")
+        print(f"stdout: {res.stdout}")
+        print(f"stderr: {res.stderr}")
+        return False
+
+    # 3. Recompose video
+    print(f"[{video_name}] Recomposing video...")
+    upscaled_files = [f for f in os.listdir(frames_up_dir) if f.endswith('_out.jpg')]
+    upscaled_files.sort()
+    n_upscaled = len(upscaled_files)
+    recompose_cmd = [
+        "ffmpeg",
+        "-i", os.path.join(frames_up_dir, "frame_%08d_out.jpg"),
+        "-i", filepath,
+        "-map", "0:v", "-map", "1:a",
+        "-c:v", "libx264", "-crf", "18", "-preset", "slow",
+        "-c:a", "copy",
+        output_video
+    ]
+    if use_tqdm and n_upscaled:
+        print(f"[{video_name}] Progress: Recomposing {n_upscaled} frames...")
+        print(f"[{video_name}] command used for recomposition: {' '.join(recompose_cmd)}")
+        with tqdm(total=n_upscaled, desc="Recomposing", unit="frame") as pbar:
+            proc = subprocess.Popen(recompose_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            while True:
+                line = proc.stderr.readline()
+                if not line:
+                    break
+                if "frame=" in line:
+                    try:
+                        current = int(line.split("frame=")[-1].split()[0])
+                        pbar.n = current
+                        pbar.refresh()
+                    except Exception:
+                        pass
+            proc.wait()
+            pbar.n = n_upscaled
+            pbar.refresh()
+        res = proc
+    else:
+        res = subprocess.run(recompose_cmd, capture_output=True, text=True)
+    if res.returncode != 0:
+        err = res.stderr.read() if hasattr(res.stderr, 'read') else res.stderr
+        print(f"[{video_name}] Recomposition failed: {err}")
+        return False
+    print(f"[{video_name}] Upscaled video saved to {output_video}")
+    return True
+
+
+def ensure_realesrgan_weights(weights_dir="extern/Real-ESRGAN/weights", model_name="RealESRGAN_x4plus.pth"):
     """
     Checks if the Real-ESRGAN model file is present in the weights directory.
     If not, downloads it using wget.
