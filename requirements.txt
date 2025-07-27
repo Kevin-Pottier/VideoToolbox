@@ -1,20 +1,32 @@
+# Affichage coloré en console
+colorama<1.0
 
+# Lecture/écriture de fichiers .srt
+pysrt<2.0
 
-# Required for colored terminal output
-colorama
-# Required for reading/writing subtitle files
-pysrt
-# Required for Google Translate API (subtitle translation)
-deep-translator
-# Standard library, but required for GUI
-tkinter
+# Traduction des sous-titres via Google Translate
+deep-translator<2.0
 
-basicsr>=1.4.2
-facexlib>=0.2.5
-gfpgan>=1.3.5
-numpy
-opencv-python
-Pillow
-torch>=1.7
-torchvision
-tqdm
+# Dépendances Real‑ESRGAN
+# basicsr, facexlib et gfpgan sont requis par Real‑ESRGAN:contentReference[oaicite:1]{index=1}
+basicsr>=1.4.2,<1.5
+facexlib>=0.2.5,<0.3
+gfpgan>=1.3.5,<1.4
+
+# NumPy 1.x est nécessaire pour PyTorch/BasicSR ; évitez NumPy 2
+numpy>=1.21,<2
+
+# OpenCV doit rester en deçà de la version 4.12, car cette dernière impose NumPy ≥2
+opencv-python<4.12.0
+
+# Pillow n’a pas encore de problème connu, mais restons sur la branche 10
+Pillow<11.0
+
+# PyTorch doit être ≥1.7 mais <2 pour Real‑ESRGAN:contentReference[oaicite:2]{index=2}
+torch>=1.7,<2
+
+# Pour que torchvision conserve l’API utilisée par basicsr, évitez les versions ≥0.15
+torchvision<0.15
+
+# Barre de progression
+tqdm<5.0
