@@ -15,10 +15,11 @@ Modern, user-friendly Python GUI for compressing or upscaling one or multiple vi
 - Robust error handling and user feedback throughout.
 
 ## Requirements
-- Python 3.8+
+
+- Python 3.8–3.9 (for advanced features; not compatible with Python 3.10+)
 - FFmpeg and FFprobe installed and available in your system PATH
-- Real-ESRGAN (Python version) and its dependencies (see `extern/Real-ESRGAN/requirements.txt`)
-- Pretrained Real-ESRGAN weights (see `weights/` folder)
+- **No need to install Real-ESRGAN Python dependencies or external repo!**
+- The upscaling feature now uses the portable `realesrgan-ncnn-vulkan.exe` tool (included in the `Tool/` folder), which works out-of-the-box on Windows and leverages your GPU automatically.
 - Python packages listed in `requirements.txt`:
   - `colorama` (for colored terminal output)
   - `pysrt` (for reading/writing subtitle files)
@@ -26,18 +27,21 @@ Modern, user-friendly Python GUI for compressing or upscaling one or multiple vi
   - `tkinter` (standard library)
 
 ## Usage
+
 0. Clone the repo using: 
    ```bash
-   git clone --recurse-submodules https://github.com/Kevin-Pottier/VideoCompress.git
+   git clone https://github.com/Kevin-Pottier/VideoCompress.git
    ```
 1. Install requirements:
-   `pip install -r requirements.txt`
+   ```bash
+   pip install -r requirements.txt
+   ```
 2. Install FFmpeg and make sure it is in your system PATH.
-3. (Optional, for upscaling) Install Real-ESRGAN dependencies:
-   `pip install -r extern/Real-ESRGAN/requirements.txt`
-   - Download or place the required Real-ESRGAN model weights in the `weights/` folder (see `extern/Real-ESRGAN/README.md` for details).
+3. **Upscaling is ready out-of-the-box!** The `Tool/realesrgan-ncnn-vulkan.exe` executable is included and does not require any Python or CUDA setup. No need to install or configure anything else for upscaling.
 4. Run the app:
-   `python main.py`
+   ```bash
+   python main.py
+   ```
 5. Choose a mode:
    - **Video Compression**: Select one or more videos, configure subtitles, output format, and size. Batch mode shows a scrollable window with per-file progress and ETA.
    - **Video Upscaling (Real-ESRGAN)**: Select one or more videos to upscale. Choose upscaling factor (e.g., 2x, 4x) and model. Progress bars and ETA are shown for each file. Output is saved in the selected folder.
@@ -46,7 +50,8 @@ Modern, user-friendly Python GUI for compressing or upscaling one or multiple vi
 ## Major Changes
 - Unified single and batch video compression into one workflow.
 - **Added Real-ESRGAN video upscaling:**
-  - Seamless integration of Real-ESRGAN for high-quality video upscaling.
+  - Now uses the portable `realesrgan-ncnn-vulkan.exe` tool for upscaling (no Python/CUDA/PyTorch setup needed).
+  - Seamless integration for high-quality video upscaling.
   - Select upscaling factor and model from the GUI.
   - Batch upscaling with per-file progress and ETA.
 - Modernized all GUIs (fonts, colors, spacing, centering).
@@ -104,6 +109,8 @@ You can create a standalone `.exe` for easy sharing and use on Windows:
 ## Troubleshooting
 
 - Only third-party packages (like `colorama`) are listed in `requirements.txt`. Standard Python libraries such as `os`, `subprocess`, and `tkinter` are included with every Python installation and do not need to be installed separately. If you encounter errors about missing standard libraries, your Python installation may be broken—reinstall Python from the official website to fix this.
+- If you see errors related to Real-ESRGAN or its dependencies, make sure you are using Python 3.8 or 3.9. Real-ESRGAN is not compatible with Python 3.10 or newer.
+- For upscaling, if you see errors about missing `realesrgan-ncnn-vulkan.exe`, make sure the `Tool/` folder is present and contains the executable. No Python dependencies are needed for upscaling.
 
 ---
 Feel free to modify the project for your own needs!
