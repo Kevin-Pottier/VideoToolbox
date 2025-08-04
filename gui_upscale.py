@@ -235,8 +235,9 @@ def run_upscale(filepath, w, h, outdir):
         if proc.returncode != 0:
             print(f"[{video_name}] Upscale failed!")
             print(f"Command: {' '.join(up_cmd)}")
-            print(f"stdout: {proc.stdout.read() if proc.stdout else ''}")
-            print(f"stderr: {proc.stderr.read() if proc.stderr else ''}")
+            out, err = proc.communicate()
+            print(f"stdout: {out}")
+            print(f"stderr: {err}")
             progress_queue.put({"finished": True, "success": False})
             return
         progress_queue.put({"finished": True, "success": True})
