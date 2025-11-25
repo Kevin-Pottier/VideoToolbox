@@ -1,12 +1,16 @@
 
 import os
+from tkinter.ttk import Frame
+from tkinter.ttk import Label
+from tkinter.ttk import Label
+from re import Match
 from colorama import Fore, Style
 from utils import ffprobe
 import subprocess
 # Import reusable GUI helpers for modern, DRY window/dialog creation
 from main import apply_modern_theme, create_styled_frame, create_styled_label
 
-def run_compression(file_path, sub_option, sub_file, ext, max_size_gb, gui_progress=None):
+def run_compression(file_path, sub_option, sub_file, ext, max_size_gb, gui_progress=None) -> None:
     """
     Compress a video file using FFmpeg, with optional subtitle handling and GUI/CLI progress bars.
     Args:
@@ -28,7 +32,7 @@ def run_compression(file_path, sub_option, sub_file, ext, max_size_gb, gui_progr
         return os.path.abspath(path).replace("\\", "/").replace(":", "\\:")
 
     # Metadata extraction
-    duration_str = ffprobe([
+    duration_str: str = ffprobe([
         "ffprobe", "-v", "error", "-show_entries",
         "format=duration", "-of",
         "default=noprint_wrappers=1:nokey=1", file_path
@@ -41,7 +45,7 @@ def run_compression(file_path, sub_option, sub_file, ext, max_size_gb, gui_progr
         print(Fore.RED + f"Could not determine video duration (got '{duration_str}'). Aborting." + Style.RESET_ALL)
         return
 
-    audio_bitrate_str = ffprobe([
+    audio_bitrate_str: str = ffprobe([
         "ffprobe", "-v", "error", "-select_streams",
         "a:0", "-show_entries", "stream=bit_rate",
         "-of", "default=noprint_wrappers=1:nokey=1",
@@ -62,7 +66,7 @@ def run_compression(file_path, sub_option, sub_file, ext, max_size_gb, gui_progr
 
     # Bitrate calculation
     target_bits = max_size_gb * 1024 * 1024 * 1024 * 8  # in bits
-    audio_bits_total = audio_bitrate * duration # in bits
+    audio_bits_total: float = audio_bitrate * duration # in bits
     video_bits_total = target_bits - audio_bits_total # in bits
     video_bitrate = video_bits_total / duration # in bits per second
     video_bitrate_kbps = int(video_bitrate / 1000) # in kbps
@@ -84,7 +88,8 @@ def run_compression(file_path, sub_option, sub_file, ext, max_size_gb, gui_progr
             "-c:s", "mov_text",
             "-map", "0:v", "-map", "0:a", "-map", "1:s",
             "-c:v", "libx264", "-b:v", f"{video_bitrate_kbps}k",
-            "-preset", "medium", "-c:a", "aac", "-b:a", "192k",
+            "-preset", "medium",
+            "-c:a", "aac", "-ac", "2", "-ar", "48000", "-b:a", "192k",
             "-movflags", "+faststart",
             output_name, "-y"
         ]
@@ -92,7 +97,8 @@ def run_compression(file_path, sub_option, sub_file, ext, max_size_gb, gui_progr
         ffmpeg_cmd = [
             "ffmpeg", "-i", video_name,
             "-c:v", "libx264", "-b:v", f"{video_bitrate_kbps}k",
-            "-preset", "medium", "-c:a", "aac", "-b:a", "192k",
+            "-preset", "medium",
+            "-c:a", "aac", "-ac", "2", "-ar", "48000", "-b:a", "192k",
             "-movflags", "+faststart"
         ]
         if sub_option == "hard" and sub_file:
@@ -125,18 +131,18 @@ def run_compression(file_path, sub_option, sub_file, ext, max_size_gb, gui_progr
         # Apply modern theme and palette using helper
         style = ttk.Style(progress_win)
         apply_modern_theme(progress_win, style)
-        frame = create_styled_frame(progress_win)
+        frame: Frame = create_styled_frame(progress_win)
         frame.pack(fill="both", expand=True, padx=10, pady=10)
         create_styled_label(frame, text=f"Compressing: {video_name}", style='Title.TLabel').pack(pady=(0, 8))
         progress_var = tk.DoubleVar(master=progress_win)
         progress_bar = ttk.Progressbar(frame, variable=progress_var, maximum=duration, length=350, style='TProgressbar')
         progress_bar.pack(pady=6)
-        percent_label = create_styled_label(frame, text="0%", style='TLabel')
+        percent_label: Label = create_styled_label(frame, text="0%", style='TLabel')
         percent_label.pack()
-        time_label = create_styled_label(frame, text="Estimated time left: --:--", style='TLabel', font=("Segoe UI", 10, "italic"))
+        time_label: Label = create_styled_label(frame, text="Estimated time left: --:--", style='TLabel', font=("Segoe UI", 10, "italic"))
         time_label.pack()
 
-        def update_gui(cur_time, percent, mins, secs):
+        def update_gui(cur_time, percent, mins, secs) -> None:
             if not progress_win.winfo_exists():
                 return
             try:
@@ -150,7 +156,7 @@ def run_compression(file_path, sub_option, sub_file, ext, max_size_gb, gui_progr
             except Exception:
                 pass
 
-        def finalize_gui():
+        def finalize_gui() -> None:
             if not progress_win.winfo_exists():
                 return
             try:
@@ -161,7 +167,7 @@ def run_compression(file_path, sub_option, sub_file, ext, max_size_gb, gui_progr
             except Exception:
                 pass
             # Schedule window close after 500ms if still open
-            def safe_destroy():
+            def safe_destroy() -> None:
                 try:
                     if progress_win.winfo_exists():
                         progress_win.destroy()
@@ -174,33 +180,33 @@ def run_compression(file_path, sub_option, sub_file, ext, max_size_gb, gui_progr
                 pass
 
     import sys
-    def run_ffmpeg():
+    def run_ffmpeg() -> None:
         """
         Run FFmpeg as a subprocess, parse its output for progress, and update both GUI and CLI progress bars.
         """
         import time
-        proc = subprocess.Popen(ffmpeg_cmd, cwd=video_dir, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
+        proc: os.Popen[str] = subprocess.Popen(ffmpeg_cmd, cwd=video_dir, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
         last_time = 0
-        start_time = time.time()
+        start_time: float = time.time()
         bar_len = 40
         while True:
-            line = proc.stderr.readline()
+            line: str = proc.stderr.readline()
             if not line:
                 if proc.poll() is not None:
                     break
                 continue
             if "time=" in line:
                 import re
-                match = re.search(r'time=(\d+):(\d+):(\d+\.\d+)', line)
+                match: Match[str] | None = re.search(r'time=(\d+):(\d+):(\d+\.\d+)', line)
                 if match:
                     h, m, s = match.groups()
-                    cur_time = int(h) * 3600 + int(m) * 60 + float(s)
-                    last_time = cur_time
-                    percent = min(100, int(cur_time / duration * 100))
-                    elapsed = time.time() - start_time
+                    cur_time: float = int(h) * 3600 + int(m) * 60 + float(s)
+                    last_time: float = cur_time
+                    percent: int = min(100, int(cur_time / duration * 100))
+                    elapsed: float = time.time() - start_time
                     if cur_time > 0 and percent < 100:
-                        est_total = elapsed / (cur_time / duration)
-                        remaining = est_total - elapsed
+                        est_total: float = elapsed / (cur_time / duration)
+                        remaining: float = est_total - elapsed
                         mins, secs = divmod(int(remaining), 60)
                     else:
                         mins, secs = None, None
@@ -210,7 +216,7 @@ def run_compression(file_path, sub_option, sub_file, ext, max_size_gb, gui_progr
                         progress_win.after(0, update_gui, cur_time, percent, mins, secs)
                         # CMD progress bar
                         filled_len = int(round(bar_len * cur_time / float(duration)))
-                        bar = '=' * filled_len + '-' * (bar_len - filled_len)
+                        bar: str = '=' * filled_len + '-' * (bar_len - filled_len)
                         sys.stdout.write(f'\rCompressing: [{bar}] {percent}% | ETA: {mins if mins is not None else 0:02d}:{secs if secs is not None else 0:02d}')
                         sys.stdout.flush()
         proc.wait()
@@ -224,7 +230,7 @@ def run_compression(file_path, sub_option, sub_file, ext, max_size_gb, gui_progr
             progress_win.after(0, finalize_gui)
             # Force CMD progress bar to 100%
             bar_len = 40
-            bar = '=' * bar_len
+            bar: str = '=' * bar_len
             sys.stdout.write(f'\rCompressing: [{bar}] 100% | ETA: 00:00\n')
             sys.stdout.flush()
         if proc.returncode == 0:
@@ -235,7 +241,7 @@ def run_compression(file_path, sub_option, sub_file, ext, max_size_gb, gui_progr
     if gui_progress is None:
         # Use a flag to signal when done
         done_flag = threading.Event()
-        def run_ffmpeg_and_finalize():
+        def run_ffmpeg_and_finalize() -> None:
             run_ffmpeg()
             # Finalize GUI from main thread, only if window still exists
             try:
