@@ -58,8 +58,8 @@ def main():
         from gui_upscale import run_video_upscale_gui
         run_video_upscale_gui()
     elif usage == "audio_fix":
-        from gui_audio_fix import run_audio_fix
-        run_audio_fix()
+        from gui_audio_fix import gui_audio
+        gui_audio()
 
 if __name__ == "__main__":
     main()
