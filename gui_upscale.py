@@ -235,17 +235,39 @@ def run_upscale(filepath, w, h, outdir):
         if proc.returncode != 0:
             print(f"[{video_name}] Upscale failed!")
             print(f"Command: {' '.join(up_cmd)}")
-            print(f"stdout: {proc.stdout.read() if proc.stdout else ''}")
-            print(f"stderr: {proc.stderr.read() if proc.stderr else ''}")
-            progress_root.destroy()
-            return False
-        progress_root.destroy()
-        return True
+            out, err = proc.communicate()
+            print(f"stdout: {out}")
+            print(f"stderr: {err}")
+            progress_queue.put({"finished": True, "success": False})
+            return
+        progress_queue.put({"finished": True, "success": True})
+
+    # Function to process queue and update GUI
+    def process_queue():
+        try:
+            while True:
+                msg = progress_queue.get_nowait()
+                if "done" in msg:
+                    progress_var.set(msg["done"])
+                if "eta_str" in msg:
+                    eta_label.config(text=f"ETA: {msg['eta_str']}")
+                if msg.get("finished"):
+                    # If success is set, store it
+                    if "success" in msg:
+                        upscale_result["success"] = msg["success"]
+                    progress_root.after(100, progress_root.destroy)
+                    return
+        except queue.Empty:
+            pass
+        progress_root.after(100, process_queue)
+
     t = threading.Thread(target=upscale_thread)
     t.start()
+    process_queue()
     progress_root.mainloop()
     t.join()
-
+    if upscale_result["success"] is False:
+        return False
     # 3. Recompose video
     print(f"[{video_name}] Recomposing video...")
     upscaled_files = [f for f in os.listdir(frames_up_dir) if f.endswith('_out.jpg')]

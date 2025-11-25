@@ -2,7 +2,6 @@
 import tkinter as tk
 from gui_helpers import apply_modern_theme, create_styled_frame, create_styled_label, create_styled_button
 
-from tkinter import filedialog, messagebox
 import os
 import cv2
 
