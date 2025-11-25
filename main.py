@@ -38,6 +38,7 @@ def choose_usage_dialog():
     create_styled_button(frame, "Video Compression", lambda: set_usage("video_compression"), width=22).pack(pady=7)
     create_styled_button(frame, "Subtitle Translation", lambda: set_usage("sub_translation"), width=22).pack(pady=7)
     create_styled_button(frame, "Upscale video (Real-ESRGAN)", lambda: set_usage("video_upscale"), width=22).pack(pady=7)
+    create_styled_button(frame, "Audio fix for stereo", lambda: set_usage("audio_fix"), width=22).pack(pady=7)
     root.mainloop()
     root.destroy()
     return usage
@@ -56,6 +57,9 @@ def main():
     elif usage == "video_upscale":
         from gui_upscale import run_video_upscale_gui
         run_video_upscale_gui()
+    elif usage == "audio_fix":
+        from gui_audio_fix import run_audio_fix
+        run_audio_fix()
 
 if __name__ == "__main__":
     main()
