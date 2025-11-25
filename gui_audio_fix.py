@@ -32,7 +32,7 @@ from typing import Callable, Optional
 from audio_fix import run_audio_fix
 from gui_helpers import apply_modern_theme, create_styled_frame, create_styled_label, create_styled_button
 
-def main() -> None:
+def gui_audio() -> None:
     # Root window setup
     root = tk.Tk()
     root.title("Audio Fix (Stereo Down‑mix)")
@@ -175,6 +175,3 @@ def main() -> None:
     clear_btn.pack(side="left", padx=4)
 
     root.mainloop()
-
-if __name__ == "__main__":
-    main()
