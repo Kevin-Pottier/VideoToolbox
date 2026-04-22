@@ -40,6 +40,7 @@ def choose_usage_dialog():
     create_styled_button(frame, "Upscale video (Real-ESRGAN)", lambda: set_usage("video_upscale"), width=22).pack(pady=7)
     create_styled_button(frame, "Audio fix for stereo", lambda: set_usage("audio_fix"), width=22).pack(pady=7)
     create_styled_button(frame, "Add subtitles", lambda: set_usage("add_subtitles"), width=22).pack(pady=7)
+    create_styled_button(frame, "Audio Tracks Management", lambda: set_usage("audio_tracks"), width=22).pack(pady=7)
     root.mainloop()
     root.destroy()
     return usage
@@ -64,6 +65,9 @@ def main():
     elif usage == "add_subtitles":
         from gui_add_subtitles import run_add_subtitles_gui
         run_add_subtitles_gui()
+    elif usage == "audio_tracks":
+        from gui_audio_tracks import run_audio_tracks_gui
+        run_audio_tracks_gui()
 
 if __name__ == "__main__":
     main()
