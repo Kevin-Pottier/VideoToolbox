@@ -324,19 +324,29 @@ def build_audio_mapping_options(
     
     # Build disposition for default audio track
     if len(audio_maps) > 1 and options.default_track_index is not None:
-        # Find output index of default track
-        for i, track in enumerate(media_info.audio_tracks):
-            if track.stream_index == options.default_track_index:
-                # Set this as default, clear others
-                for j in range(len(audio_maps)):
-                    if j == i:
-                        disposition_args.extend(["-disposition:a", f"{j} default"])
-                    else:
-                        disposition_args.extend(["-disposition:a", f"{j} 0"])
-                break
+        # Find the input index (position in media_info.audio_tracks) of the default track
+        default_input_index = next(
+            (idx for idx, track in enumerate(media_info.audio_tracks)
+             if track.stream_index == options.default_track_index),
+            None
+        )
+        
+        if default_input_index is not None:
+            # For each audio map, determine if it's the default track
+            for j, audio_map in enumerate(audio_maps):
+                # Extract the source audio index from the map (e.g., "0:a:2" -> 2)
+                source_index = int(audio_map.split(":")[-1])
+                
+                if source_index == default_input_index:
+                    # This is the default track
+                    disposition_args.extend(["-disposition:a:" + str(j), "default"])
+                else:
+                    # Clear the default flag
+                    disposition_args.extend(["-disposition:a:" + str(j), "0"])
+    
     elif len(audio_maps) == 1 and options.default_track_index is not None:
         # Single track - just ensure it's default
-        disposition_args.extend(["-disposition:a:0 default"])
+        disposition_args.extend(["-disposition:a:0", "default"])
     
     # Codec selection
     video_codec = "copy" if not options.reencode_video else "libx264"
