@@ -46,7 +46,7 @@ def run_video_compression():
     root = tk.Tk()
     root.withdraw()
     root.attributes('-topmost', True)
-    file_paths = filedialog.askopenfilenames(title="Choose video file(s)", filetypes=[("Videos", "*.mp4 *.mkv *.avi")])
+    file_paths = filedialog.askopenfilenames(title="Choose video file(s)", filetypes=[("Videos", "*.mp4 *.mkv *.avi *.mov *.flv *.wmv")])
     root.destroy()
     if not file_paths:
         msg_root = tk.Tk()
