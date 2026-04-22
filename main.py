@@ -25,7 +25,7 @@ def choose_usage_dialog():
     # Center the window
     root.update_idletasks()
     w = 380
-    h = 380
+    h = 400
     x = (root.winfo_screenwidth() // 2) - (w // 2)
     y = (root.winfo_screenheight() // 2) - (h // 2)
     root.geometry(f"{w}x{h}+{x}+{y}")
