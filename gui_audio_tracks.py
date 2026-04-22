@@ -45,24 +45,43 @@ def run_audio_tracks_gui():
     root.destroy()
     
     if not file_path:
+        print(Fore.YELLOW + "No file selected. Cancelled." + Style.RESET_ALL)
         return
+    
+    print(Fore.CYAN + f"Selected file: {file_path}" + Style.RESET_ALL)
     
     # Step 2: Analyze file and show track selection UI
     try:
+        print(Fore.YELLOW + "Analyzing media file with ffprobe..." + Style.RESET_ALL)
         media_info = ffprobe_streams(file_path)
-    except RuntimeError as e:
+        print(Fore.GREEN + f"✓ Found {len(media_info.audio_tracks)} audio track(s)" + Style.RESET_ALL)
+        
+    except FileNotFoundError:
+        error_msg = "FFmpeg/FFprobe not found.\n\nPlease ensure FFmpeg is installed and in your system PATH."
+        print(Fore.RED + "❌ FFmpeg not found" + Style.RESET_ALL)
         msg_root = tk.Tk()
         msg_root.attributes('-topmost', True)
         msg_root.withdraw()
-        messagebox.showerror("Error", f"Failed to analyze video file:\n{e}", parent=msg_root)
+        messagebox.showerror("❌ FFmpeg Not Found", error_msg, parent=msg_root)
+        msg_root.destroy()
+        return
+        
+    except RuntimeError as e:
+        error_msg = str(e)
+        print(Fore.RED + f"❌ FFprobe error: {error_msg}" + Style.RESET_ALL)
+        msg_root = tk.Tk()
+        msg_root.attributes('-topmost', True)
+        msg_root.withdraw()
+        messagebox.showerror("❌ Analysis Error", f"Failed to analyze video file:\n\n{error_msg}", parent=msg_root)
         msg_root.destroy()
         return
     
     if not media_info.audio_tracks:
+        print(Fore.YELLOW + "No audio tracks found in file" + Style.RESET_ALL)
         msg_root = tk.Tk()
         msg_root.attributes('-topmost', True)
         msg_root.withdraw()
-        messagebox.showinfo("No Audio", "No audio tracks found in this video file.", parent=msg_root)
+        messagebox.showinfo("ℹ No Audio", "No audio tracks found in this video file.", parent=msg_root)
         msg_root.destroy()
         return
     
@@ -357,15 +376,28 @@ def process_audio_tracks(
     # Build command
     ffmpeg_cmd = build_ffmpeg_command(file_path, output_file, mapping_info)
     
-    print(Fore.CYAN + "\n" + "=" * 60)
-    print("Audio Track Processing")
-    print("=" * 60 + Style.RESET_ALL)
-    print(f"Input: {file_path}")
-    print(f"Output: {output_file}")
-    print(f"Selected tracks: {selected_tracks}")
-    print(f"Default track: {default_track}")
-    print(Fore.YELLOW + "\nFFmpeg command:" + Style.RESET_ALL)
-    print(" ".join(ffmpeg_cmd))
+    # Verbose output
+    print(Fore.CYAN + "\n" + "=" * 70)
+    print("AUDIO TRACK PROCESSING")
+    print("=" * 70 + Style.RESET_ALL)
+    print(f"{Fore.GREEN}📁 Input:{Style.RESET_ALL}   {file_path}")
+    print(f"{Fore.GREEN}📁 Output:{Style.RESET_ALL}  {output_file}")
+    print()
+    print(f"{Fore.YELLOW}🎵 Audio Tracks:{Style.RESET_ALL}")
+    for track in media_info.audio_tracks:
+        marker = "✓" if track.stream_index in selected_tracks else " "
+        default_marker = " ★ DEFAULT" if track.stream_index == default_track else ""
+        lang = track.language.upper() if track.language else "?"
+        print(f"   [{marker}] Stream {track.stream_index}: {lang} | {track.channels}ch | {track.codec}{default_marker}")
+    print()
+    print(f"{Fore.YELLOW}📋 Options:{Style.RESET_ALL}")
+    print(f"   Keep video: {keep_video_var.get()}")
+    print(f"   Keep subtitles: {keep_subs_var.get()}")
+    print(f"   Container: {ext.upper()}")
+    print()
+    print(f"{Fore.CYAN}🔧 FFmpeg Command:{Style.RESET_ALL}")
+    print(f"   {' '.join(ffmpeg_cmd)}")
+    print()
     
     # Show progress window
     show_progress_window(file_path, output_file, ffmpeg_cmd, media_info.duration)
@@ -431,6 +463,7 @@ def show_progress_window(input_file: str, output_file: str, ffmpeg_cmd: list, du
     def run_ffmpeg():
         """Run FFmpeg in background thread and update progress."""
         video_dir = os.path.dirname(input_file) or "."
+        error_output = []
         
         try:
             proc = subprocess.Popen(
@@ -449,6 +482,10 @@ def show_progress_window(input_file: str, output_file: str, ffmpeg_cmd: list, du
                     if proc.poll() is not None:
                         break
                     continue
+                
+                # Capture error messages
+                if any(err in line.lower() for err in ["error", "failed", "invalid"]):
+                    error_output.append(line.strip())
                 
                 if "time=" in line:
                     match = re.search(r'time=(\d+):(\d+):(\d+\.\d+)', line)
@@ -481,18 +518,29 @@ def show_progress_window(input_file: str, output_file: str, ffmpeg_cmd: list, du
             progress_root.after(0, lambda: time_label.config(text="Completed!"))
             
             if proc.returncode == 0:
+                print(Fore.GREEN + "✅ Processing completed successfully!" + Style.RESET_ALL)
                 progress_root.after(100, lambda: messagebox.showinfo(
-                    "Success",
+                    "✅ Success",
                     f"Audio tracks processed successfully!\n\nOutput: {os.path.basename(output_file)}"
                 ))
             else:
+                error_msg = "\n".join(error_output[-5:]) if error_output else "Unknown error (check console for details)"
+                print(Fore.RED + f"❌ Processing failed with code {proc.returncode}" + Style.RESET_ALL)
+                print(Fore.RED + f"Error: {error_msg}" + Style.RESET_ALL)
                 progress_root.after(100, lambda: messagebox.showerror(
-                    "Error",
-                    "Failed to process audio tracks."
+                    "❌ Error",
+                    f"Failed to process audio tracks.\n\nError: {error_msg}\n\nCheck console for full details."
                 ))
                 
+        except FileNotFoundError:
+            error_msg = "FFmpeg not found. Please ensure FFmpeg is installed and in your PATH."
+            print(Fore.RED + "❌ " + error_msg + Style.RESET_ALL)
+            progress_root.after(0, lambda: messagebox.showerror("❌ Error", error_msg))
+            
         except Exception as e:
-            progress_root.after(0, lambda: messagebox.showerror("Error", str(e)))
+            error_msg = str(e)
+            print(Fore.RED + f"❌ Exception: {error_msg}" + Style.RESET_ALL)
+            progress_root.after(0, lambda: messagebox.showerror("❌ Error", f"An unexpected error occurred:\n{error_msg}"))
         
         progress_root.after(100, progress_root.destroy)
     
