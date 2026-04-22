@@ -25,7 +25,7 @@ def choose_usage_dialog():
     # Center the window
     root.update_idletasks()
     w = 380
-    h = 270
+    h = 380
     x = (root.winfo_screenwidth() // 2) - (w // 2)
     y = (root.winfo_screenheight() // 2) - (h // 2)
     root.geometry(f"{w}x{h}+{x}+{y}")
@@ -39,6 +39,7 @@ def choose_usage_dialog():
     create_styled_button(frame, "Subtitle Translation", lambda: set_usage("sub_translation"), width=22).pack(pady=7)
     create_styled_button(frame, "Upscale video (Real-ESRGAN)", lambda: set_usage("video_upscale"), width=22).pack(pady=7)
     create_styled_button(frame, "Audio fix for stereo", lambda: set_usage("audio_fix"), width=22).pack(pady=7)
+    create_styled_button(frame, "Add subtitles", lambda: set_usage("add_subtitles"), width=22).pack(pady=7)
     root.mainloop()
     root.destroy()
     return usage
@@ -60,6 +61,9 @@ def main():
     elif usage == "audio_fix":
         from gui_audio_fix import gui_audio
         gui_audio()
+    elif usage == "add_subtitles":
+        from gui_add_subtitles import run_add_subtitles_gui
+        run_add_subtitles_gui()
 
 if __name__ == "__main__":
     main()
