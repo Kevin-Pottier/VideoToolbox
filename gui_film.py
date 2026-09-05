@@ -1,4 +1,3 @@
-import concurrent.futures
 import tkinter as tk
 from tkinter import filedialog, simpledialog, messagebox
 from colorama import Fore, Style
@@ -132,29 +131,38 @@ def run_video_compression():
 
         # Max size
         max_size_gb = None
+
         while max_size_gb is None or max_size_gb <= 0:
             root = tk.Tk()
             root.withdraw()
             root.attributes('-topmost', True)
-            # Use ttk simpledialog if available, else fallback
-            try:
-                max_size_gb = float(simpledialog.askstring("Target Video Size", "Enter the maximum file size in GB:", parent=root))
-            except Exception:
-                max_size_gb = None
+            size_input = simpledialog.askstring("Target Video Size", "Enter the maximum file size in GB:", parent=root)
             root.destroy()
-            if not max_size_gb or max_size_gb <= 0:
+            if size_input is None:
+                messagebox.showerror("❌ Error", "Unable to determine the max size.")
+                return
+            try:
+                max_size_gb = float(size_input)
+            except ValueError:
+                max_size_gb = None
+            if max_size_gb is None or max_size_gb <= 0:
                 msg_root = tk.Tk()
                 msg_root.attributes('-topmost', True)
                 msg_root.withdraw()
                 messagebox.showerror("Size Error", "Invalid size. Must be greater than 0.", parent=msg_root)
                 msg_root.destroy()
 
+        if sub_file is None:
+            messagebox.showerror("❌ Error", "Unable to determine the subtitle file.")
+            return
+
         run_compression(path, sub_option, sub_file, ext, max_size_gb)
         return
 
     # MULTIPLE FILES WORKFLOW (improved subtitle selection)
     # Step 2: Ask which videos need subtitles (checkbox list)
-    subtitle_choices = [None] * len(file_paths)
+    from typing import List, Optional, Tuple
+    subtitle_choices: List[Optional[Tuple[str, Optional[str]]]] = [None] * len(file_paths)
     checklist_root = tk.Tk()
     checklist_root.title("Select Videos for Subtitles")
     checklist_root.geometry("500x400")
@@ -251,16 +259,21 @@ def run_video_compression():
 
     # Step 4: Max size (reuse logic)
     max_size_gb = None
+
     while max_size_gb is None or max_size_gb <= 0:
         root = tk.Tk()
         root.withdraw()
         root.attributes('-topmost', True)
-        try:
-            max_size_gb = float(simpledialog.askstring("Target Video Size (Multiple)", "Enter the maximum file size in GB (applies to all):", parent=root))
-        except Exception:
-            max_size_gb = None
+        size_input = simpledialog.askstring("Target Video Size (Multiple)", "Enter the maximum file size in GB (applies to all):", parent=root)
         root.destroy()
-        if not max_size_gb or max_size_gb <= 0:
+        if size_input is None:
+            messagebox.showerror("❌ Error", "Unable to determine the max size.")
+            return
+        try:
+            max_size_gb = float(size_input)
+        except ValueError:
+            max_size_gb = None
+        if max_size_gb is None or max_size_gb <= 0:
             msg_root = tk.Tk()
             msg_root.attributes('-topmost', True)
             msg_root.withdraw()
@@ -317,6 +330,9 @@ def run_video_compression():
     def compress_one(idx, path, sub_option, sub_file):
         def gui_progress(percent, mins, secs):
             progress_queues[idx].put((percent, mins, secs))
+        if max_size_gb == None:
+            messagebox.showerror("❌ Error", "Unable to determine the max size.")
+            return
         run_compression(path, sub_option, sub_file, ext, max_size_gb, gui_progress=gui_progress)
         # Ensure bar is set to 100% at the end
         progress_queues[idx].put((100, 0, 0))

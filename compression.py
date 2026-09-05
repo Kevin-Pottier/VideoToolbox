@@ -2,8 +2,6 @@
 import os
 from tkinter.ttk import Frame
 from tkinter.ttk import Label
-from tkinter.ttk import Label
-from re import Match
 from colorama import Fore, Style
 from utils import ffprobe
 import subprocess
@@ -186,7 +184,7 @@ def run_compression(file_path, sub_option, sub_file, ext, max_size_gb, gui_progr
         Run FFmpeg as a subprocess, parse its output for progress, and update both GUI and CLI progress bars.
         """
         import time
-        proc: os.Popen[str] = subprocess.Popen(ffmpeg_cmd, cwd=video_dir, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
+        proc: subprocess.Popen[str] = subprocess.Popen(ffmpeg_cmd, cwd=video_dir, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
         last_time = 0
         start_time: float = time.time()
         bar_len = 40
