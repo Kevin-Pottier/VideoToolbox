@@ -6,11 +6,10 @@ Integrates with the existing VideoCompress application.
 """
 
 import tkinter as tk
-from tkinter import ttk, filedialog, messagebox
+from tkinter import filedialog, messagebox
 from colorama import Fore, Style
 import os
 import threading
-import queue
 
 # Import reusable GUI helpers
 from gui_helpers import apply_modern_theme, create_styled_frame, create_styled_label, create_styled_button
@@ -19,7 +18,6 @@ from gui_helpers import apply_modern_theme, create_styled_frame, create_styled_l
 from audio_tracks import (
     ffprobe_streams,
     MediaFileInfo,
-    AudioTrackInfo,
     AudioProcessingOptions,
     build_audio_mapping_options,
     build_ffmpeg_command
@@ -32,7 +30,6 @@ def run_audio_tracks_gui():
     Main entry point for the audio tracks management GUI.
     Follows the same pattern as other GUI modules in the application.
     """
-    from tkinter import ttk
     
     # Step 1: Select video file
     root = tk.Tk()
@@ -352,7 +349,6 @@ def process_audio_tracks(
         keep_subs_var: BooleanVar for "keep subtitles"
         container_var: StringVar for output container
     """
-    from tkinter import ttk
     
     # Build options
     options = AudioProcessingOptions(
@@ -398,7 +394,11 @@ def process_audio_tracks(
     print(f"{Fore.CYAN}🔧 FFmpeg Command:{Style.RESET_ALL}")
     print(f"   {' '.join(ffmpeg_cmd)}")
     print()
-    
+
+    if media_info.duration is None:
+        messagebox.showerror("❌ Error", "Unable to determine the media duration.")
+        return
+
     # Show progress window
     show_progress_window(file_path, output_file, ffmpeg_cmd, media_info.duration)
 
@@ -503,8 +503,11 @@ def show_progress_window(input_file: str, output_file: str, ffmpeg_cmd: list, du
                             mins, secs = None, None
                         
                         # Update GUI
-                        progress_root.after(0, lambda p=percent: progress_var.set(p))
-                        progress_root.after(0, lambda p=percent: percent_label.config(text=f"{p}%"))
+                        def update_progress(_=None):
+                            progress_var.set(percent)
+                            percent_label.config(text=f"{percent}%")
+
+                        progress_root.after(0, update_progress, None)
                         if mins is not None:
                             progress_root.after(0, lambda m=mins, s=secs: time_label.config(
                                 text=f"Estimated time left: {m:02d}:{s:02d}"

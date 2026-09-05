@@ -2,16 +2,12 @@
 import tkinter as tk
 from gui_helpers import apply_modern_theme, create_styled_frame, create_styled_label, create_styled_button
 
-import os
-import cv2
-
 def choose_usage_dialog():
     """
     Display a GUI window for the user to choose the main usage mode of the script.
     Returns:
         str: 'video_compression', 'sub_translation', or 'video_upscale' depending on user choice.
     """
-    from tkinter import ttk
     usage = None
     def set_usage(val):
         nonlocal usage
