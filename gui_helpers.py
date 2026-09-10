@@ -1,5 +1,3 @@
-import tkinter as tk
-
 def apply_modern_theme(root, style=None):
     """
     Apply a modern ttk theme (azure-dark if available, else clam with custom palette) to the given root window.

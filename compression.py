@@ -2,8 +2,6 @@
 import os
 from tkinter.ttk import Frame
 from tkinter.ttk import Label
-from tkinter.ttk import Label
-from re import Match
 from colorama import Fore, Style
 from utils import ffprobe
 import subprocess
@@ -104,7 +102,8 @@ def run_compression(file_path, sub_option, sub_file, ext, max_size_gb, gui_progr
         if sub_option == "hard" and sub_file:
             sub_filename = os.path.basename(sub_file)
             # Always use forward slashes for ffmpeg filter
-            ffmpeg_cmd += ["-vf", f"subtitles={sub_filename.replace('\\', '/')}" ]
+            sub_filename_ffmpeg = sub_filename.replace("\\", "/")
+            ffmpeg_cmd += ["-vf", f"subtitles={sub_filename_ffmpeg}"]
         ffmpeg_cmd += [output_name, "-y"]
 
     print(Fore.YELLOW + f"\nRunning ffmpeg with subtitles option: {sub_option}\n\n" + Style.RESET_ALL)
@@ -185,7 +184,7 @@ def run_compression(file_path, sub_option, sub_file, ext, max_size_gb, gui_progr
         Run FFmpeg as a subprocess, parse its output for progress, and update both GUI and CLI progress bars.
         """
         import time
-        proc: os.Popen[str] = subprocess.Popen(ffmpeg_cmd, cwd=video_dir, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
+        proc: subprocess.Popen[str] = subprocess.Popen(ffmpeg_cmd, cwd=video_dir, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
         last_time = 0
         start_time: float = time.time()
         bar_len = 40
@@ -197,7 +196,8 @@ def run_compression(file_path, sub_option, sub_file, ext, max_size_gb, gui_progr
                 continue
             if "time=" in line:
                 import re
-                match: Match[str] | None = re.search(r'time=(\d+):(\d+):(\d+\.\d+)', line)
+                from typing import Optional
+                match: Optional[re.Match] = re.search(r'time=(\d+):(\d+):(\d+\.\d+)', line)
                 if match:
                     h, m, s = match.groups()
                     cur_time: float = int(h) * 3600 + int(m) * 60 + float(s)

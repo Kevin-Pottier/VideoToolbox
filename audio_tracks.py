@@ -382,7 +382,8 @@ def build_ffmpeg_command(
     cmd = ["ffmpeg", "-i", input_file]
     
     # Add video map
-    video_map = mapping_info.get("video_map")
+    from typing import Optional
+    video_map: Optional[str] = mapping_info.get("video_map")
     if video_map:
         cmd.extend(["-map", video_map])
     

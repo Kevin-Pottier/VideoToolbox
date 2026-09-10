@@ -23,6 +23,7 @@ __pycache__/
 *.DS_Store
 *.spec
 .vscode/*
+.idea/
 
 weights/
 
