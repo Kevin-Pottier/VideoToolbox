@@ -2,8 +2,6 @@ import tkinter as tk
 from tkinter import filedialog, messagebox
 from colorama import Fore, Style
 import os
-import pysrt
-import concurrent.futures
 import subprocess
 import re
 import threading
@@ -154,7 +152,8 @@ def run_add_subtitles_gui():
     
     # Multiple files workflow
     # Step 2: Ask which videos need subtitles
-    subtitle_choices = [None] * len(file_paths)
+    from typing import Optional
+    subtitle_choices: list[tuple[str, Optional[str]]] = [("none", None)] * len(file_paths)
     checklist_root = tk.Tk()
     checklist_root.title("Select Videos for Subtitles")
     checklist_root.geometry("500x400")

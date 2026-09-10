@@ -5,9 +5,8 @@ from colorama import Fore, Style
 import os
 import pysrt
 from deep_translator import GoogleTranslator
-import concurrent.futures
 # Import reusable GUI helpers for modern, DRY window/dialog creation
-from gui_helpers import apply_modern_theme, create_styled_frame, create_styled_label, create_styled_button
+from gui_helpers import apply_modern_theme, create_styled_frame, create_styled_label
 import threading 
 
 
@@ -30,7 +29,8 @@ def run_subtitle_translation():
     apply_modern_theme(root, style)
     # Override TCombobox foreground color to red for text inside dropdowns
     style.configure('TCombobox', foreground='red')
-    subfile_paths = []  # List of selected subtitle files
+    from typing import List
+    subfile_paths: List[str] = []  # List of selected subtitle files
     frame = create_styled_frame(root)
     frame.pack(fill="both", expand=True, padx=10, pady=10)
 
@@ -193,7 +193,7 @@ def run_subtitle_translation():
         subs = pysrt.open(subfile, encoding='utf-8')
         translator = GoogleTranslator(source=source, target=target)
         total = len(subs)
-        results = [None] * total
+        results: List[str] = [""] * total
         import time, concurrent.futures
         completed = [0]
         start_time = time.time()

@@ -71,19 +71,22 @@ def gui_audio() -> None:
     # Button commands
     def add_files() -> None:
         root.lift()
-        root.attributes('-topmost', True)
+        root.attributes("-topmost", True)
         filepaths = filedialog.askopenfilenames(
             title="Choose video file(s)",
             filetypes=[("Videos", "*.mp4 *.mkv"), ("All files", "*.*")]
         )
+
         if not filepaths:
             return
-        # Clear existing list before adding new entries
+
         files_to_process.clear()
         listbox_files.delete(0, tk.END)
-        for p in root.tk.splitlist(filepaths):
+
+        for p in filepaths:
             files_to_process.append(p)
             listbox_files.insert(tk.END, os.path.basename(p))
+
         append_log(f"Selected {len(files_to_process)} file(s) for audio fix.")
 
     def clear_list() -> None:
@@ -112,7 +115,7 @@ def gui_audio() -> None:
         create_styled_label(batch_frame, text="Batch Audio Fix Progress", style='Title.TLabel').pack(pady=(0, 8))
         progress_vars: list[tk.DoubleVar] = []
         progress_bars: list[ttk.Progressbar] = []
-        status_labels: list[tk.Widget] = []
+        status_labels: list[tk.Label] = []
         for p in files_to_process:
             filename = os.path.basename(p)
             create_styled_label(batch_frame, text=filename, anchor="w").pack(anchor="w")
