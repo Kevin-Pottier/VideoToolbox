@@ -8,6 +8,10 @@ import subprocess
 # Import reusable GUI helpers for modern, DRY window/dialog creation
 from main import apply_modern_theme, create_styled_frame, create_styled_label
 
+AUDIO_BITRATE = 192000  # bps per audio track: used in the ffmpeg command and in the size budget
+SIZE_MARGIN = 0.02  # share of the target size kept for the container overhead and the encoder deviation
+MIN_VIDEO_BITRATE_KBPS = 100
+
 def run_compression(file_path, sub_option, sub_file, ext, max_size_gb, gui_progress=None) -> None:
     """
     Compress a video file using FFmpeg, with optional subtitle handling and GUI/CLI progress bars.
@@ -43,33 +47,32 @@ def run_compression(file_path, sub_option, sub_file, ext, max_size_gb, gui_progr
         print(Fore.RED + f"Could not determine video duration (got '{duration_str}'). Aborting." + Style.RESET_ALL)
         return
 
-    audio_bitrate_str: str = ffprobe([
-        "ffprobe", "-v", "error", "-select_streams",
-        "a:0", "-show_entries", "stream=bit_rate",
-        "-of", "default=noprint_wrappers=1:nokey=1",
+    # The audio is re-encoded at AUDIO_BITRATE: the budget depends on the number of output tracks,
+    # not on the source bitrate
+    audio_streams: str = ffprobe([
+        "ffprobe", "-v", "error", "-select_streams", "a",
+        "-show_entries", "stream=index", "-of", "csv=p=0",
         file_path
     ])
-    if not audio_bitrate_str or audio_bitrate_str == "N/A" or audio_bitrate_str == "0":
-        print(Fore.YELLOW + "Warning: Could not determine audio bitrate. Using default 128000 bps." + Style.RESET_ALL)
-        audio_bitrate = 128000
-    else:
-        try:
-            audio_bitrate = int(audio_bitrate_str)
-        except Exception:
-            print(Fore.YELLOW + f"Warning: Unexpected audio bitrate value '{audio_bitrate_str}'. Using default 128000 bps." + Style.RESET_ALL)
-            audio_bitrate = 128000
+    n_audio_source = len(audio_streams.split())
+    # 'soft' keeps every audio track (-map 0:a?), otherwise ffmpeg selects a single one
+    n_audio_out = n_audio_source if sub_option == "soft" else min(n_audio_source, 1)
 
     print(f"Duration: {duration:.2f} s")
-    print(f"Audio Bitrate: {audio_bitrate} bps")
+    print(f"Audio: {n_audio_out} track(s) encoded at {AUDIO_BITRATE // 1000} kbps")
 
     # Bitrate calculation
-    target_bits = max_size_gb * 1024 * 1024 * 1024 * 8  # in bits
-    audio_bits_total: float = audio_bitrate * duration # in bits
+    target_bits = max_size_gb * 1024 * 1024 * 1024 * 8 * (1 - SIZE_MARGIN)  # in bits
+    audio_bits_total: float = AUDIO_BITRATE * n_audio_out * duration # in bits
     video_bits_total = target_bits - audio_bits_total # in bits
     video_bitrate = video_bits_total / duration # in bits per second
     video_bitrate_kbps = int(video_bitrate / 1000) # in kbps
 
     print(f"Target Video Bitrate: {video_bitrate_kbps} kbps")
+    if video_bitrate_kbps < MIN_VIDEO_BITRATE_KBPS:
+        print(Fore.RED + f"Target size too small: only {video_bitrate_kbps} kbps left for the video "
+              f"(minimum {MIN_VIDEO_BITRATE_KBPS} kbps). Aborting." + Style.RESET_ALL)
+        return
 
     output_file = os.path.splitext(file_path)[0] + f"_compressed.{ext}"
 
@@ -83,11 +86,12 @@ def run_compression(file_path, sub_option, sub_file, ext, max_size_gb, gui_progr
         ffmpeg_cmd = [
             "ffmpeg", "-i", video_name,
             "-i", sub_filename,
-            "-c:s", "mov_text",
-            "-map", "0:v", "-map", "0:a", "-map", "1:s",
+            # mov_text is the only text subtitle codec of MP4, MKV takes SRT/ASS as they are
+            "-c:s", "mov_text" if ext == "mp4" else "copy",
+            "-map", "0:v", "-map", "0:a?", "-map", "1:s",
             "-c:v", "libx264", "-b:v", f"{video_bitrate_kbps}k",
             "-preset", "medium",
-            "-c:a", "aac", "-ac", "2", "-ar", "48000", "-b:a", "192k",
+            "-c:a", "aac", "-ac", "2", "-ar", "48000", "-b:a", f"{AUDIO_BITRATE // 1000}k",
             "-movflags", "+faststart",
             output_name, "-y"
         ]
@@ -96,7 +100,7 @@ def run_compression(file_path, sub_option, sub_file, ext, max_size_gb, gui_progr
             "ffmpeg", "-i", video_name,
             "-c:v", "libx264", "-b:v", f"{video_bitrate_kbps}k",
             "-preset", "medium",
-            "-c:a", "aac", "-ac", "2", "-ar", "48000", "-b:a", "192k",
+            "-c:a", "aac", "-ac", "2", "-ar", "48000", "-b:a", f"{AUDIO_BITRATE // 1000}k",
             "-movflags", "+faststart"
         ]
         if sub_option == "hard" and sub_file:
