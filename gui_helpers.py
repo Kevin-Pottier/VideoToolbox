@@ -34,3 +34,21 @@ def create_styled_label(parent, text, style='TLabel', **kwargs):
 def create_styled_button(parent, text, command, width=None):
     from tkinter import ttk
     return ttk.Button(parent, text=text, command=command, width=width, style='TButton')
+
+
+def show_message(kind, title, message):
+    """
+    Show a message box ('error', 'info' or 'warning') above the other windows.
+    It is attached to the open window when there is one: a second tk.Tk() would be a second
+    Tcl interpreter, whose widgets and variables cannot be mixed with the first one's.
+    """
+    import tkinter as tk
+    from tkinter import messagebox
+    root = tk._default_root
+    host = tk.Toplevel(root) if root is not None else tk.Tk()
+    host.withdraw()
+    host.attributes('-topmost', True)
+    try:
+        getattr(messagebox, f"show{kind}")(title, message, parent=host)
+    finally:
+        host.destroy()

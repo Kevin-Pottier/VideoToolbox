@@ -8,7 +8,7 @@ import time
 import pysrt
 from deep_translator import GoogleTranslator
 # Import reusable GUI helpers for modern, DRY window/dialog creation
-from gui_helpers import apply_modern_theme, create_styled_frame, create_styled_label, create_styled_button
+from gui_helpers import apply_modern_theme, create_styled_frame, create_styled_label, create_styled_button, show_message
 from utils import read_subtitle_text
 import threading 
 
@@ -132,8 +132,8 @@ def run_subtitle_translation():
 
 
 
-    src_lang = tk.StringVar(value="en")
-    tgt_lang = tk.StringVar(value="fr")
+    src_lang = tk.StringVar(value="en", master=root)
+    tgt_lang = tk.StringVar(value="fr", master=root)
 
 
 
@@ -189,11 +189,7 @@ def run_subtitle_translation():
 
     def start_translation():
         if not subfile_paths:
-            msg_root = tk.Tk()
-            msg_root.attributes('-topmost', True)
-            msg_root.withdraw()
-            messagebox.showerror("File Error", "No subtitle file(s) selected.", parent=msg_root)
-            msg_root.destroy()
+            show_message("error", "File Error", "No subtitle file(s) selected.")
             return
         ok_btn.config(state="disabled")
         # If only one file, use current window for progress
@@ -211,7 +207,7 @@ def run_subtitle_translation():
         for widget in frame.winfo_children():
             if widget not in [ok_btn, browse_frame, lang_frame]:
                 widget.destroy()
-        progress_var = tk.DoubleVar(value=0)
+        progress_var = tk.DoubleVar(value=0, master=root)
         progress_bar = ttk.Progressbar(frame, variable=progress_var, maximum=100, length=320, style='TProgressbar')
         progress_bar.pack(pady=(10, 0))
         status_label = create_styled_label(frame, "", style='TLabel', font=("Segoe UI", 10, "italic"))
@@ -241,7 +237,7 @@ def run_subtitle_translation():
         for i, subfile in enumerate(subfile_paths):
             file_label = create_styled_label(batch_frame, text=os.path.basename(subfile), anchor="w")
             file_label.pack(anchor="w")
-            pvar = tk.DoubleVar(value=0)
+            pvar = tk.DoubleVar(value=0, master=batch_win)
             pbar = ttk.Progressbar(batch_frame, variable=pvar, maximum=100, length=420, style='TProgressbar')
             pbar.pack(pady=(0, 2))
             slabel = create_styled_label(batch_frame, text="Waiting...", style='TLabel', font=("Segoe UI", 9, "italic"))

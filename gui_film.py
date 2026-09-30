@@ -3,7 +3,7 @@ from tkinter import filedialog, simpledialog, messagebox
 from colorama import Fore, Style
 import os
 from compression import run_compression
-from gui_helpers import apply_modern_theme, create_styled_frame, create_styled_label, create_styled_button
+from gui_helpers import apply_modern_theme, create_styled_frame, create_styled_label, create_styled_button, show_message
 
 def run_video_compression():
     """
@@ -17,11 +17,7 @@ def run_video_compression():
     file_paths = filedialog.askopenfilenames(title="Choose video file(s)", filetypes=[("Videos", "*.mp4 *.mkv *.avi *.mov *.flv *.wmv")])
     root.destroy()
     if not file_paths:
-        msg_root = tk.Tk()
-        msg_root.attributes('-topmost', True)
-        msg_root.withdraw()
-        messagebox.showerror("File Error", "No video files selected. Please choose at least one video file.", parent=msg_root)
-        msg_root.destroy()
+        show_message("error", "File Error", "No video files selected. Please choose at least one video file.")
         return
 
     # If only one file, use single-file workflow
@@ -33,8 +29,8 @@ def run_video_compression():
         while sub_option is None or (sub_option in ("soft", "hard") and not sub_file):
             sub_root = tk.Tk()
             sub_root.attributes('-topmost', True)
-            sub_option_var = tk.StringVar(value="none")
-            sub_file_var = tk.StringVar(value="")
+            sub_option_var = tk.StringVar(value="none", master=sub_root)
+            sub_file_var = tk.StringVar(value="", master=sub_root)
             sub_root.title(f"Subtitle Options for {os.path.basename(path)}")
             sub_root.geometry("400x300")
             sub_root.configure(bg="#23272e")
@@ -65,17 +61,13 @@ def run_video_compression():
             sub_file = sub_file_var.get() if sub_file_var.get() else None
             sub_root.destroy()
             if sub_option in ("soft", "hard") and not sub_file:
-                msg_root = tk.Tk()
-                msg_root.attributes('-topmost', True)
-                msg_root.withdraw()
-                messagebox.showerror("Subtitle Error", "You selected a subtitle option but did not choose a subtitle file. Please choose a subtitle file.", parent=msg_root)
-                msg_root.destroy()
+                show_message("error", "Subtitle Error", "You selected a subtitle option but did not choose a subtitle file. Please choose a subtitle file.")
 
         # Output container
         container_root = tk.Tk()
         container_root.withdraw()
         container_root.attributes('-topmost', True)
-        container_choice = tk.StringVar(value="mp4")
+        container_choice = tk.StringVar(value="mp4", master=container_root)
         def set_choice(val):
             container_choice.set(val)
             container_root.quit()
@@ -115,11 +107,7 @@ def run_video_compression():
             except ValueError:
                 max_size_gb = None
             if max_size_gb is None or max_size_gb <= 0:
-                msg_root = tk.Tk()
-                msg_root.attributes('-topmost', True)
-                msg_root.withdraw()
-                messagebox.showerror("Size Error", "Invalid size. Must be greater than 0.", parent=msg_root)
-                msg_root.destroy()
+                show_message("error", "Size Error", "Invalid size. Must be greater than 0.")
 
         if sub_file is None:
             messagebox.showerror("❌ Error", "Unable to determine the subtitle file.")
@@ -160,8 +148,8 @@ def run_video_compression():
         while sub_option is None or (sub_option in ("soft", "hard") and not sub_file):
             sub_root = tk.Tk()
             sub_root.attributes('-topmost', True)
-            sub_option_var = tk.StringVar(value="none")
-            sub_file_var = tk.StringVar(value="")
+            sub_option_var = tk.StringVar(value="none", master=sub_root)
+            sub_file_var = tk.StringVar(value="", master=sub_root)
             sub_root.title(f"Subtitle Options for {os.path.basename(path)}")
             sub_root.geometry("400x300")
             sub_root.configure(bg="#23272e")
@@ -192,18 +180,14 @@ def run_video_compression():
             sub_file = sub_file_var.get() if sub_file_var.get() else None
             sub_root.destroy()
             if sub_option in ("soft", "hard") and not sub_file:
-                msg_root = tk.Tk()
-                msg_root.attributes('-topmost', True)
-                msg_root.withdraw()
-                messagebox.showerror("Subtitle Error", "You selected a subtitle option but did not choose a subtitle file. Please choose a subtitle file.", parent=msg_root)
-                msg_root.destroy()
+                show_message("error", "Subtitle Error", "You selected a subtitle option but did not choose a subtitle file. Please choose a subtitle file.")
         subtitle_choices[i] = (sub_option, sub_file)
 
     # Step 3: Output container (reuse logic)
     container_root = tk.Tk()
     container_root.withdraw()
     container_root.attributes('-topmost', True)
-    container_choice = tk.StringVar(value="mp4")
+    container_choice = tk.StringVar(value="mp4", master=container_root)
     def set_choice(val):
         container_choice.set(val)
         container_root.quit()
@@ -243,11 +227,7 @@ def run_video_compression():
         except ValueError:
             max_size_gb = None
         if max_size_gb is None or max_size_gb <= 0:
-            msg_root = tk.Tk()
-            msg_root.attributes('-topmost', True)
-            msg_root.withdraw()
-            messagebox.showerror("Size Error", "Invalid size. Must be greater than 0.", parent=msg_root)
-            msg_root.destroy()
+            show_message("error", "Size Error", "Invalid size. Must be greater than 0.")
 
     import threading
     import queue

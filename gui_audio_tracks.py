@@ -13,7 +13,7 @@ import queue
 import threading
 
 # Import reusable GUI helpers
-from gui_helpers import apply_modern_theme, create_styled_frame, create_styled_label, create_styled_button
+from gui_helpers import apply_modern_theme, create_styled_frame, create_styled_label, create_styled_button, show_message
 
 # Import audio processing logic
 from audio_tracks import (
@@ -57,30 +57,18 @@ def run_audio_tracks_gui():
     except FileNotFoundError:
         error_msg = "FFmpeg/FFprobe not found.\n\nPlease ensure FFmpeg is installed and in your system PATH."
         print(Fore.RED + "❌ FFmpeg not found" + Style.RESET_ALL)
-        msg_root = tk.Tk()
-        msg_root.attributes('-topmost', True)
-        msg_root.withdraw()
-        messagebox.showerror("❌ FFmpeg Not Found", error_msg, parent=msg_root)
-        msg_root.destroy()
+        show_message("error", "❌ FFmpeg Not Found", error_msg)
         return
         
     except RuntimeError as e:
         error_msg = str(e)
         print(Fore.RED + f"❌ FFprobe error: {error_msg}" + Style.RESET_ALL)
-        msg_root = tk.Tk()
-        msg_root.attributes('-topmost', True)
-        msg_root.withdraw()
-        messagebox.showerror("❌ Analysis Error", f"Failed to analyze video file:\n\n{error_msg}", parent=msg_root)
-        msg_root.destroy()
+        show_message("error", "❌ Analysis Error", f"Failed to analyze video file:\n\n{error_msg}")
         return
     
     if not media_info.audio_tracks:
         print(Fore.YELLOW + "No audio tracks found in file" + Style.RESET_ALL)
-        msg_root = tk.Tk()
-        msg_root.attributes('-topmost', True)
-        msg_root.withdraw()
-        messagebox.showinfo("ℹ No Audio", "No audio tracks found in this video file.", parent=msg_root)
-        msg_root.destroy()
+        show_message("info", "ℹ No Audio", "No audio tracks found in this video file.")
         return
     
     # Show the audio track selection window
@@ -129,7 +117,7 @@ def show_audio_selection_window(file_path: str, media_info: MediaFileInfo):
     
     # Track selection variables
     track_vars = {}  # stream_index -> BooleanVar (checkbox)
-    default_var = tk.StringVar()  # Selected default track stream_index (radio)
+    default_var = tk.StringVar(master=selection_win)  # Selected default track stream_index (radio)
     
     # Table frame with border and header
     table_frame = tk.Frame(main_frame, bg="#1a1d23", bd=1, relief="solid")
@@ -210,7 +198,7 @@ def show_audio_selection_window(file_path: str, media_info: MediaFileInfo):
         stream_idx = track.stream_index
         
         # Create BooleanVar for checkbox (default: selected)
-        track_vars[stream_idx] = tk.BooleanVar(value=True)
+        track_vars[stream_idx] = tk.BooleanVar(value=True, master=selection_win)
         
         # Set default selection to first track or existing default
         if track.is_default or (default_var.get() == "" and stream_idx == media_info.audio_tracks[0].stream_index):
@@ -270,8 +258,8 @@ def show_audio_selection_window(file_path: str, media_info: MediaFileInfo):
     options_frame = create_styled_frame(main_frame)
     options_frame.pack(fill="x", pady=8)
     
-    keep_video_var = tk.BooleanVar(value=True)
-    keep_subs_var = tk.BooleanVar(value=True)
+    keep_video_var = tk.BooleanVar(value=True, master=selection_win)
+    keep_subs_var = tk.BooleanVar(value=True, master=selection_win)
     
     ttk.Checkbutton(options_frame, text="Keep video track", variable=keep_video_var, style='TCheckbutton').pack(anchor="w")
     ttk.Checkbutton(options_frame, text="Keep subtitle tracks", variable=keep_subs_var, style='TCheckbutton').pack(anchor="w", padx=(20, 0))
@@ -282,7 +270,7 @@ def show_audio_selection_window(file_path: str, media_info: MediaFileInfo):
     
     create_styled_label(container_frame, "Output container:").pack(side="left")
     
-    container_var = tk.StringVar(value="mp4")
+    container_var = tk.StringVar(value="mp4", master=selection_win)
     ttk.Radiobutton(container_frame, text="MP4", variable=container_var, value="mp4", style='TRadiobutton').pack(side="left", padx=10)
     ttk.Radiobutton(container_frame, text="MKV", variable=container_var, value="mkv", style='TRadiobutton').pack(side="left", padx=10)
     
@@ -290,16 +278,14 @@ def show_audio_selection_window(file_path: str, media_info: MediaFileInfo):
     btn_frame = create_styled_frame(main_frame)
     btn_frame.pack(fill="x", pady=(8, 0))
     
+    choice = {}
+
     def on_process():
         # Collect selected tracks
         selected_tracks = [idx for idx, var in track_vars.items() if var.get()]
         
         if not selected_tracks:
-            msg_root = tk.Tk()
-            msg_root.attributes('-topmost', True)
-            msg_root.withdraw()
-            messagebox.showerror("Selection Error", "Please select at least one audio track to keep.", parent=msg_root)
-            msg_root.destroy()
+            show_message("error", "Selection Error", "Please select at least one audio track to keep.")
             return
         
         # Get default track
@@ -309,16 +295,10 @@ def show_audio_selection_window(file_path: str, media_info: MediaFileInfo):
         if default_track not in selected_tracks:
             default_track = selected_tracks[0]
         
+        # Read the choices while the window exists; the processing starts once its event loop has ended
+        choice.update(selected_tracks=selected_tracks, default_track=default_track, keep_video=keep_video_var.get(),
+                      keep_subs=keep_subs_var.get(), container=container_var.get())
         selection_win.destroy()
-        process_audio_tracks(
-            file_path, 
-            media_info, 
-            selected_tracks,
-            default_track,
-            keep_video_var, 
-            keep_subs_var, 
-            container_var
-        )
     
     def on_cancel():
         selection_win.destroy()
@@ -327,6 +307,8 @@ def show_audio_selection_window(file_path: str, media_info: MediaFileInfo):
     create_styled_button(btn_frame, "Cancel", on_cancel).pack(side="right", padx=5)
     
     selection_win.mainloop()
+    if choice:
+        process_audio_tracks(file_path, media_info, **choice)
 
 
 def process_audio_tracks(
@@ -334,9 +316,9 @@ def process_audio_tracks(
     media_info: MediaFileInfo,
     selected_tracks: list[int],
     default_track: int,
-    keep_video_var: tk.BooleanVar,
-    keep_subs_var: tk.BooleanVar,
-    container_var: tk.StringVar
+    keep_video: bool,
+    keep_subs: bool,
+    container: str
 ):
     """
     Process the video file with the selected audio track options.
@@ -346,9 +328,9 @@ def process_audio_tracks(
         media_info: Parsed media information
         selected_tracks: List of stream indices to keep
         default_track: Stream index to set as default
-        keep_video_var: BooleanVar for "keep video"
-        keep_subs_var: BooleanVar for "keep subtitles"
-        container_var: StringVar for output container
+        keep_video: Keep the video track
+        keep_subs: Keep the subtitle tracks
+        container: Output container ('mp4' or 'mkv')
     """
     
     # Build options
@@ -356,8 +338,8 @@ def process_audio_tracks(
         keep_all_audio=False,
         selected_tracks=selected_tracks,
         default_track_index=default_track,
-        keep_video=keep_video_var.get(),
-        keep_subtitles=keep_subs_var.get(),
+        keep_video=keep_video,
+        keep_subtitles=keep_subs,
         reencode_video=False,
         reencode_audio=False
     )
@@ -367,7 +349,7 @@ def process_audio_tracks(
     
     # Determine output file
     base_name = os.path.splitext(file_path)[0]
-    ext = container_var.get()
+    ext = container
     output_file = f"{base_name}_audio_processed.{ext}"
     
     # Build command
@@ -388,8 +370,8 @@ def process_audio_tracks(
         print(f"   [{marker}] Stream {track.stream_index}: {lang} | {track.channels}ch | {track.codec}{default_marker}")
     print()
     print(f"{Fore.YELLOW}📋 Options:{Style.RESET_ALL}")
-    print(f"   Keep video: {keep_video_var.get()}")
-    print(f"   Keep subtitles: {keep_subs_var.get()}")
+    print(f"   Keep video: {keep_video}")
+    print(f"   Keep subtitles: {keep_subs}")
     print(f"   Container: {ext.upper()}")
     print()
     print(f"{Fore.CYAN}🔧 FFmpeg Command:{Style.RESET_ALL}")
@@ -440,7 +422,7 @@ def show_progress_window(input_file: str, output_file: str, ffmpeg_cmd: list, du
         style='TLabel'
     ).pack(pady=(0, 8))
     
-    progress_var = tk.DoubleVar(value=0)
+    progress_var = tk.DoubleVar(value=0, master=progress_root)
     progress_bar = ttk.Progressbar(
         frame,
         variable=progress_var,

@@ -9,7 +9,7 @@ import tempfile
 import threading
 import queue
 # Import reusable GUI helpers for modern, DRY window/dialog creation
-from gui_helpers import apply_modern_theme, create_styled_frame, create_styled_label, create_styled_button
+from gui_helpers import apply_modern_theme, create_styled_frame, create_styled_label, create_styled_button, show_message
 
 
 def add_subtitles_to_video(video_path, sub_option, sub_file, gui_progress=None):
@@ -148,11 +148,7 @@ def run_add_subtitles_gui():
     root.destroy()
     
     if not file_paths:
-        msg_root = tk.Tk()
-        msg_root.attributes('-topmost', True)
-        msg_root.withdraw()
-        messagebox.showerror("File Error", "No video files selected. Please choose at least one video file.", parent=msg_root)
-        msg_root.destroy()
+        show_message("error", "File Error", "No video files selected. Please choose at least one video file.")
         return
     
     # Single file workflow
@@ -223,8 +219,8 @@ def prompt_subtitle_options(path):
     while sub_option is None or (sub_option in ("soft", "hard") and not sub_file):
         sub_root = tk.Tk()
         sub_root.attributes('-topmost', True)
-        sub_option_var = tk.StringVar(value="none")
-        sub_file_var = tk.StringVar(value="")
+        sub_option_var = tk.StringVar(value="none", master=sub_root)
+        sub_file_var = tk.StringVar(value="", master=sub_root)
         sub_root.title(f"Subtitle Options for {os.path.basename(path)}")
         sub_root.geometry("400x300")
         sub_root.configure(bg="#23272e")
@@ -264,11 +260,7 @@ def prompt_subtitle_options(path):
         sub_root.destroy()
         
         if sub_option in ("soft", "hard") and not sub_file:
-            msg_root = tk.Tk()
-            msg_root.attributes('-topmost', True)
-            msg_root.withdraw()
-            messagebox.showerror("Subtitle Error", "You selected a subtitle option but did not choose a subtitle file. Please choose a subtitle file.", parent=msg_root)
-            msg_root.destroy()
+            show_message("error", "Subtitle Error", "You selected a subtitle option but did not choose a subtitle file. Please choose a subtitle file.")
     
     return (sub_option, sub_file)
 
@@ -278,11 +270,7 @@ def process_single_file(path, sub_option, sub_file):
     from tkinter import ttk
     
     if sub_option == "none":
-        msg_root = tk.Tk()
-        msg_root.attributes('-topmost', True)
-        msg_root.withdraw()
-        messagebox.showinfo("No Subtitles", "No subtitle option selected. Nothing to do.", parent=msg_root)
-        msg_root.destroy()
+        show_message("info", "No Subtitles", "No subtitle option selected. Nothing to do.")
         return
     
     # Progress window
@@ -299,7 +287,7 @@ def process_single_file(path, sub_option, sub_file):
     create_styled_label(frame, "Adding subtitles to:", style='Title.TLabel').pack(pady=(0, 5))
     create_styled_label(frame, os.path.basename(path), style='TLabel').pack(pady=(0, 10))
     
-    progress_var = tk.DoubleVar(value=0)
+    progress_var = tk.DoubleVar(value=0, master=progress_root)
     progress_bar = ttk.Progressbar(frame, variable=progress_var, maximum=100, length=350, style='TProgressbar')
     progress_bar.pack(pady=6)
     
@@ -342,11 +330,7 @@ def process_multiple_files(file_paths, subtitle_choices):
     from tkinter import ttk
     
     if all(choice[0] == "none" for choice in subtitle_choices):
-        msg_root = tk.Tk()
-        msg_root.attributes('-topmost', True)
-        msg_root.withdraw()
-        messagebox.showinfo("No Subtitles", "No subtitle option selected for any video. Nothing to do.", parent=msg_root)
-        msg_root.destroy()
+        show_message("info", "No Subtitles", "No subtitle option selected for any video. Nothing to do.")
         return
     
     # Batch progress window

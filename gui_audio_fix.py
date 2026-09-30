@@ -120,7 +120,7 @@ def gui_audio() -> None:
         for p in files_to_process:
             filename = os.path.basename(p)
             create_styled_label(batch_frame, text=filename, anchor="w").pack(anchor="w")
-            pvar = tk.DoubleVar(value=0)
+            pvar = tk.DoubleVar(value=0, master=progress_win)
             pbar = ttk.Progressbar(batch_frame, variable=pvar, maximum=100, length=420, style='TProgressbar')
             pbar.pack(pady=(0, 2))
             slabel = create_styled_label(batch_frame, text="Waiting...", style='TLabel', font=("Segoe UI", 9, "italic"))
