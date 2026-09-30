@@ -8,7 +8,7 @@ from colorama import Fore, Style
 from utils import ffprobe, prepare_subtitle_file
 import subprocess
 # Import reusable GUI helpers for modern, DRY window/dialog creation
-from main import apply_modern_theme, create_styled_frame, create_styled_label
+from gui_helpers import apply_modern_theme, create_styled_frame, create_styled_label
 
 AUDIO_BITRATE = 192000  # bps per audio track: used in the ffmpeg command and in the size budget
 SIZE_MARGIN = 0.02  # share of the target size kept for the container overhead and the encoder deviation
@@ -199,7 +199,6 @@ def run_compression(file_path, sub_option, sub_file, ext, max_size_gb, gui_progr
         """
         import time
         proc: subprocess.Popen[str] = subprocess.Popen(ffmpeg_cmd, cwd=work_dir, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
-        last_time = 0
         start_time: float = time.time()
         bar_len = 40
         while True:
@@ -215,7 +214,6 @@ def run_compression(file_path, sub_option, sub_file, ext, max_size_gb, gui_progr
                 if match:
                     h, m, s = match.groups()
                     cur_time: float = int(h) * 3600 + int(m) * 60 + float(s)
-                    last_time: float = cur_time
                     percent: int = min(100, int(cur_time / duration * 100))
                     elapsed: float = time.time() - start_time
                     if cur_time > 0 and percent < 100:
@@ -250,7 +248,7 @@ def run_compression(file_path, sub_option, sub_file, ext, max_size_gb, gui_progr
         if proc.returncode == 0:
             print(Fore.GREEN + f"\n✅ Compression finished. Output: {output_file}" + Style.RESET_ALL)
         else:
-            print(Fore.RED + f"\n❌ Compression failed." + Style.RESET_ALL)
+            print(Fore.RED + "\n❌ Compression failed." + Style.RESET_ALL)
 
     try:
         if gui_progress is None:

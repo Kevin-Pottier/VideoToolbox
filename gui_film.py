@@ -3,38 +3,7 @@ from tkinter import filedialog, simpledialog, messagebox
 from colorama import Fore, Style
 import os
 from compression import run_compression
-
-def apply_modern_theme(root):
-    from tkinter import ttk
-    style = ttk.Style(root)
-    try:
-        style.theme_use('azure-dark')
-    except Exception:
-        style.theme_use('clam')
-        style.configure('TFrame', background="#23272e")
-        style.configure('TLabel', background="#23272e", foreground="#f5f6fa", font=("Segoe UI", 11))
-        style.configure('Title.TLabel', background="#23272e", foreground="#4fd1c5", font=("Segoe UI", 15, "bold"))
-        style.configure('TButton', font=("Segoe UI", 12), padding=6, background="#353b48", foreground="#f5f6fa", borderwidth=0)
-        style.map('TButton',
-            background=[('active', '#4fd1c5'), ('!active', '#353b48')],
-            foreground=[('active', '#23272e'), ('!active', '#f5f6fa')]
-        )
-        style.configure('TCheckbutton', background="#23272e", foreground="#f5f6fa", font=("Segoe UI", 10))
-        style.configure('TRadiobutton', background="#23272e", foreground="#f5f6fa", font=("Segoe UI", 10))
-        style.configure('TProgressbar', troughcolor="#23272e", background="#4fd1c5", thickness=18)
-    return style
-
-def create_styled_frame(root):
-    from tkinter import ttk
-    return ttk.Frame(root, style='TFrame')
-
-def create_styled_label(parent, text, style='TLabel', **kwargs):
-    from tkinter import ttk
-    return ttk.Label(parent, text=text, style=style, background="#23272e", **kwargs)
-
-def create_styled_button(parent, text, command, width=None):
-    from tkinter import ttk
-    return ttk.Button(parent, text=text, command=command, width=width, style='TButton')
+from gui_helpers import apply_modern_theme, create_styled_frame, create_styled_label, create_styled_button
 
 def run_video_compression():
     """
@@ -300,7 +269,7 @@ def run_video_compression():
     canvas = tk.Canvas(progress_root, bg="#23272e", highlightthickness=0, width=w-20, height=h-80)
     scrollbar = ttk.Scrollbar(progress_root, orient="vertical", command=canvas.yview)
     scroll_frame = create_styled_frame(canvas)
-    scroll_frame_id = canvas.create_window((0, 0), window=scroll_frame, anchor="nw")
+    canvas.create_window((0, 0), window=scroll_frame, anchor="nw")
     canvas.configure(yscrollcommand=scrollbar.set)
     canvas.pack(side="left", fill="both", expand=True, padx=(10,0), pady=(0,10))
     scrollbar.pack(side="right", fill="y", pady=(0,10))

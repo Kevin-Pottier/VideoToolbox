@@ -6,7 +6,7 @@ import os
 import pysrt
 from deep_translator import GoogleTranslator
 # Import reusable GUI helpers for modern, DRY window/dialog creation
-from gui_helpers import apply_modern_theme, create_styled_frame, create_styled_label
+from gui_helpers import apply_modern_theme, create_styled_frame, create_styled_label, create_styled_button
 from utils import read_subtitle_text
 import threading 
 
@@ -74,7 +74,6 @@ def run_subtitle_translation():
     create_styled_label(frame, text="Choose subtitle file(s) to translate:").pack(pady=(0, 6))
     browse_frame = create_styled_frame(frame)
     browse_frame.pack(pady=(0, 4))
-    from main import create_styled_button  # Import here to avoid circular import issues
     create_styled_button(browse_frame, text="Browse Subtitles", width=18, command=browse).pack(side="left", padx=(0, 8))
     subfile_label = create_styled_label(browse_frame, "", width=32, anchor="w", justify="left")
     subfile_label.pack(side="left")

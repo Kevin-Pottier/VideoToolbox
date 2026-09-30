@@ -166,7 +166,6 @@ def run_audio_fix(file_path: str,
         )
         bar_len = 40
         start_time = None
-        last_percent = 0
         # Only attempt progress tracking if duration is known
         while True:
             line = proc.stderr.readline()
@@ -202,7 +201,6 @@ def run_audio_fix(file_path: str,
                         filled_len = int(round(bar_len * percent / 100))
                         bar = '=' * filled_len + '-' * (bar_len - filled_len)
                         print(f'\rFixing audio: [{bar}] {percent:5.1f}% | ETA: {mins:02d}:{secs:02d}', end='', flush=True)
-                        last_percent = percent
         proc.wait()
         # Ensure progress bar finishes at 100%
         if not gui_progress and duration:

@@ -92,7 +92,7 @@ def add_subtitles_to_video(video_path, sub_option, sub_file, gui_progress=None):
         print(Fore.GREEN + f"\n✅ Subtitles added successfully. Output: {output_file}" + Style.RESET_ALL)
         return output_file
     else:
-        print(Fore.RED + f"\n❌ Failed to add subtitles." + Style.RESET_ALL)
+        print(Fore.RED + "\n❌ Failed to add subtitles." + Style.RESET_ALL)
         return None
 
 
@@ -101,7 +101,6 @@ def _run_with_progress(ffmpeg_cmd, cwd, duration, gui_progress):
     import time
     proc = subprocess.Popen(ffmpeg_cmd, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
     start_time = time.time()
-    last_time = 0
     
     while True:
         line = proc.stderr.readline()
@@ -115,7 +114,6 @@ def _run_with_progress(ffmpeg_cmd, cwd, duration, gui_progress):
             if match:
                 h, m, s = match.groups()
                 cur_time = int(h) * 3600 + int(m) * 60 + float(s)
-                last_time = cur_time
                 
                 if duration > 0:
                     percent = min(100, int(cur_time / duration * 100))
@@ -300,7 +298,7 @@ def process_single_file(path, sub_option, sub_file):
     frame = create_styled_frame(progress_root)
     frame.pack(fill="both", expand=True, padx=10, pady=10)
     
-    create_styled_label(frame, f"Adding subtitles to:", style='Title.TLabel').pack(pady=(0, 5))
+    create_styled_label(frame, "Adding subtitles to:", style='Title.TLabel').pack(pady=(0, 5))
     create_styled_label(frame, os.path.basename(path), style='TLabel').pack(pady=(0, 10))
     
     progress_var = tk.DoubleVar(value=0)
@@ -370,7 +368,7 @@ def process_multiple_files(file_paths, subtitle_choices):
     canvas = tk.Canvas(progress_root, bg="#23272e", highlightthickness=0, width=w-20, height=h-80)
     scrollbar = ttk.Scrollbar(progress_root, orient="vertical", command=canvas.yview)
     scroll_frame = create_styled_frame(canvas)
-    scroll_frame_id = canvas.create_window((0, 0), window=scroll_frame, anchor="nw")
+    canvas.create_window((0, 0), window=scroll_frame, anchor="nw")
     canvas.configure(yscrollcommand=scrollbar.set)
     canvas.pack(side="left", fill="both", expand=True, padx=(10,0), pady=(0,10))
     scrollbar.pack(side="right", fill="y", pady=(0,10))

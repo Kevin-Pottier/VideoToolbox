@@ -18,6 +18,9 @@ def apply_modern_theme(root, style=None):
             background=[('active', '#4fd1c5'), ('!active', '#353b48')],
             foreground=[('active', '#23272e'), ('!active', '#f5f6fa')]
         )
+        style.configure('TCheckbutton', background="#23272e", foreground="#f5f6fa", font=("Segoe UI", 10))
+        style.configure('TRadiobutton', background="#23272e", foreground="#f5f6fa", font=("Segoe UI", 10))
+        style.configure('TProgressbar', troughcolor="#23272e", background="#4fd1c5", thickness=18)
     return style
 
 def create_styled_frame(root):
