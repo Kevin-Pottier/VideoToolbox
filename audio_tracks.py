@@ -6,6 +6,7 @@ Uses ffprobe JSON output for robust stream detection.
 """
 
 import json
+import re
 import subprocess
 from dataclasses import dataclass, field
 from typing import Optional
@@ -14,6 +15,11 @@ from colorama import Fore, Style
 # Text subtitle codecs that can be converted to mov_text, the only text subtitle codec of MP4.
 # Image based subtitles (PGS, DVD, DVB) cannot be stored in MP4.
 MP4_CONVERTIBLE_SUBTITLE_CODECS = {"subrip", "srt", "ass", "ssa", "webvtt", "mov_text", "text"}
+
+# French audio: ISO 639 language tags, or track titles such as "VFF 5.1" when the tag is missing.
+# "VOSTFR" (original version with French subtitles) is not French audio and does not match.
+FRENCH_LANGUAGE_CODES = {"fr", "fre", "fra"}
+FRENCH_TITLE_PATTERN = re.compile(r"\b(fr|fre|fra|french|truefrench|fran[cç]ais|vf[fqi2]?)\b", re.IGNORECASE)
 
 
 @dataclass
@@ -31,6 +37,7 @@ class AudioTrackInfo:
         bit_rate: Bit rate in bps, or None
         is_default: Whether this track is marked as default in source
         disposition: Raw disposition flags from ffprobe
+        disposition_flags: Names of the other disposition flags set in source (e.g. 'visual_impaired')
     """
     stream_index: int
     language: Optional[str] = None
@@ -41,6 +48,7 @@ class AudioTrackInfo:
     bit_rate: Optional[int] = None
     is_default: bool = False
     disposition: int = 0
+    disposition_flags: list[str] = field(default_factory=list)
     
     @property
     def display_name(self) -> str:
@@ -217,7 +225,8 @@ def ffprobe_streams(file_path: str) -> MediaFileInfo:
                 channel_layout=stream.get("channel_layout"),
                 bit_rate=int(stream["bit_rate"]) if stream.get("bit_rate") else None,
                 is_default=is_default,
-                disposition=disposition.get("default", 0)
+                disposition=disposition.get("default", 0),
+                disposition_flags=[name for name, value in disposition.items() if value and name != "default"]
             ))
             
         elif codec_type == "subtitle":
@@ -245,6 +254,19 @@ def ffprobe_streams(file_path: str) -> MediaFileInfo:
         duration=duration,
         format_name=format_name
     )
+
+
+def is_french_track(track: AudioTrackInfo) -> bool:
+    """True for a French audio track, from its language tag or, when untagged, its title."""
+    language = (track.language or "").lower().split("-")[0]
+    if language and language != "und":
+        return language in FRENCH_LANGUAGE_CODES
+    return bool(track.title and FRENCH_TITLE_PATTERN.search(track.title))
+
+
+def french_first(audio_tracks: list[AudioTrackInfo]) -> list[AudioTrackInfo]:
+    """Audio tracks with the French ones first; the other tracks keep their order."""
+    return sorted(audio_tracks, key=lambda track: not is_french_track(track))
 
 
 @dataclass

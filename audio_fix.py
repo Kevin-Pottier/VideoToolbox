@@ -2,9 +2,11 @@
 audio_fix.py
 -----------------
 
-This module provides functionality to down‑mix the audio track of a
-video file to a stereo AAC stream while leaving the video stream
-untouched.  The primary use case for this function is to convert
+This module provides functionality to down‑mix the audio tracks of a
+video file to stereo AAC streams while leaving the video stream
+untouched.  Every audio track, subtitle and attachment is kept, and the
+French audio tracks are moved first (the first one becomes the default
+track), the other tracks keep their order.  The primary use case for this function is to convert
 files that carry multi‑channel audio (e.g. 5.1 surround) into a
 two‑channel stereo layout which is broadly compatible with mobile
 players such as Telegram.  The implementation is inspired by the
@@ -14,11 +16,11 @@ usage.
 
 Key features:
 
-* Detects the duration of the input file via ``ffprobe`` to drive
-  progress reporting when run without a GUI progress callback.
+* Reads the streams (languages, duration) via ``ffprobe`` to order the
+  audio tracks and drive progress reporting when run without a GUI progress callback.
 * Constructs an ``ffmpeg`` command that copies the video stream
-  untouched (``-c:v copy``) and re‑encodes the audio stream to AAC
-  stereo with a configurable bitrate and sample rate.
+  untouched (``-c:v copy``) and re‑encodes every audio stream to AAC
+  stereo with a configurable bitrate and sample rate, French first.
 * Optionally updates a GUI or CLI progress bar by parsing the
   ``ffmpeg`` stderr output for timestamps.
 
@@ -48,34 +50,31 @@ except ImportError:
     Fore = _Ansi()  # type: ignore
     Style = _Ansi()  # type: ignore
 
-# Try to reuse the ffprobe helper from the repository.  When the module
-# is not available (e.g. when running this script outside of the
-# repository context) fall back to a simple implementation that runs
-# ``ffprobe`` directly.
-try:
-    from utils import ffprobe as _external_ffprobe  # type: ignore
-except Exception:
-    import subprocess as _subprocess
-    def ffprobe(cmd: list[str]) -> str:
-        result = _subprocess.run(
-            cmd,
-            stdout=_subprocess.PIPE,
-            stderr=_subprocess.PIPE,
-            universal_newlines=True
-        )
-        return result.stdout.strip()
-else:
-    ffprobe = _external_ffprobe  # type: ignore
+from audio_tracks import ffprobe_streams, french_first, is_french_track
+
+# Disposition flags kept when the default flag of a track changes. ffmpeg replaces all the flags
+# of a stream given with -disposition, and these names are understood by old ffmpeg versions too.
+KEPT_DISPOSITION_FLAGS = ("dub", "original", "comment", "lyrics", "karaoke", "forced", "hearing_impaired",
+                          "visual_impaired", "clean_effects", "captions", "descriptions", "dependent", "metadata")
+
+
+def _track_label(track) -> str:
+    label = (track.language or "?").upper()
+    if track.channels:
+        label += f" {track.channels}ch"
+    if track.title:
+        label += f" ({track.title})"
+    return label
 
 def run_audio_fix(file_path: str,
                   audio_channels: int = 2,
                   sample_rate: int = 48_000,
                   audio_bitrate: str = "160k",
                   gui_progress: Optional[Callable[[float, Optional[int], Optional[int]], None]] = None
-                  ) -> None:
+                  ) -> list[str]:
     """
-    Convert the audio track of the given video file to AAC stereo while
-    leaving the video track untouched.  A progress bar will be
+    Convert the audio tracks of the given video file to AAC stereo while
+    leaving the video track untouched, French tracks first.  A progress bar will be
     displayed in the terminal unless a ``gui_progress`` callback is
     provided.  Upon successful completion a new file is written next
     to the original one with ``_fixed`` appended to the base name.
@@ -95,10 +94,16 @@ def run_audio_fix(file_path: str,
         provided, the function assumes the caller will handle GUI
         updates and no terminal progress bar will be printed.
 
+    Returns
+    -------
+    list[str]
+        Labels of the audio tracks in their output order (e.g. ``"FRE 6ch"``).
+
     Raises
     ------
     RuntimeError
-        If ``ffmpeg`` returns a non‑zero exit code.
+        If the file cannot be read, has no audio track, or if ``ffmpeg``
+        returns a non‑zero exit code.
     """
     # Normalize path and determine output filename
     abs_path = os.path.abspath(file_path)
@@ -107,34 +112,48 @@ def run_audio_fix(file_path: str,
     output_ext = ext if ext else ".mp4"
     output_file = f"{base}_fixed{output_ext}"
 
-    # Determine duration using ffprobe to drive progress estimation
-    duration_str = ffprobe([
-        "ffprobe", "-v", "error", "-show_entries",
-        "format=duration", "-of",
-        "default=noprint_wrappers=1:nokey=1", abs_path
-    ])
-    try:
-        duration = float(duration_str)
-        if duration <= 0:
-            raise ValueError
-    except Exception:
-        print(Fore.RED + f"Could not determine video duration for '{file_path}' (got '{duration_str}')." + Style.RESET_ALL)
-        duration = None  # Disable progress if unknown
+    # Streams and duration (the duration drives the progress estimation)
+    media = ffprobe_streams(abs_path)
+    if not media.audio_tracks:
+        raise RuntimeError("no audio track to fix")
+    duration = media.duration if media.duration and media.duration > 0 else None
+    if duration is None:
+        print(Fore.RED + f"Could not determine video duration for '{file_path}'." + Style.RESET_ALL)
 
-    # Build ffmpeg command
-    ffmpeg_cmd = [
-        "ffmpeg", "-i", abs_path,
-        "-c:v", "copy",
+    # French tracks first. Without -map ffmpeg would keep a single audio track and at most one subtitle.
+    audio_tracks = french_first(media.audio_tracks)
+    has_french = is_french_track(audio_tracks[0])
+    ffmpeg_cmd = ["ffmpeg", "-i", abs_path, "-map", "0:v?"]
+    for track in audio_tracks:
+        ffmpeg_cmd += ["-map", f"0:{track.stream_index}"]
+    ffmpeg_cmd += ["-map", "0:s?"]
+    if output_ext.lower() == ".mkv":
+        ffmpeg_cmd += ["-map", "0:t?"]  # attachments (fonts of ASS subtitles)
+    ffmpeg_cmd += [
+        "-c", "copy",
         "-c:a", "aac",
         "-ac", str(audio_channels),
         "-ar", str(sample_rate),
         "-b:a", audio_bitrate,
+    ]
+    if has_french:
+        # The first French track becomes the default one, the other flags of each track are kept
+        for out_index, track in enumerate(audio_tracks):
+            should_be_default = out_index == 0
+            if track.is_default != should_be_default:
+                flags = [flag for flag in track.disposition_flags if flag in KEPT_DISPOSITION_FLAGS]
+                if should_be_default:
+                    flags.insert(0, "default")
+                ffmpeg_cmd += [f"-disposition:a:{out_index}", "+".join(flags) or "0"]
+    ffmpeg_cmd += [
         "-movflags", "+faststart",
         output_file,
         "-y"
     ]
+    track_order = [_track_label(track) for track in audio_tracks]
 
     print(Fore.YELLOW + f"\nRunning audio fix for: {os.path.basename(file_path)}" + Style.RESET_ALL)
+    print("\tAudio tracks: " + ", ".join(track_order) + ("" if has_french else " (no French track found, order kept)"))
     print("\tCommand:", " ".join(ffmpeg_cmd))
 
     def run_ffmpeg_and_report() -> None:
@@ -199,9 +218,19 @@ def run_audio_fix(file_path: str,
         run_ffmpeg_and_report()
     else:
         # Use a background thread to avoid blocking when a progress bar window is open
-        thread = threading.Thread(target=run_ffmpeg_and_report)
+        errors: list[Exception] = []
+
+        def run_in_thread() -> None:
+            try:
+                run_ffmpeg_and_report()
+            except Exception as e:  # re-raised below: an exception does not leave a thread by itself
+                errors.append(e)
+        thread = threading.Thread(target=run_in_thread)
         thread.start()
         thread.join()
+        if errors:
+            raise errors[0]
+    return track_order
 
 if __name__ == "__main__":
     import argparse

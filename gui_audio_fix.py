@@ -3,8 +3,8 @@ gui_audio_fix.py
 -----------------
 
 This script provides a graphical user interface (GUI) for down‑mixing the
-audio track of one or more video files to stereo AAC using the
-``audio_fix`` module.  It leverages the shared ``gui_helpers`` module
+audio tracks of one or more video files to stereo AAC using the
+``audio_fix`` module (every track is kept, French tracks first).  It leverages the shared ``gui_helpers`` module
 from this repository to deliver a consistent look and feel across
 different tools.  Users can select multiple files, launch the
 conversion and track progress for each file via a progress bar and
@@ -128,11 +128,12 @@ def gui_audio() -> None:
             progress_bars.append(pbar)
             status_labels.append(slabel)
 
-        def on_file_done(idx: int, input_path: str, success: bool, error: Optional[Exception] = None) -> None:
+        def on_file_done(idx: int, input_path: str, success: bool, error: Optional[Exception] = None,
+                         track_order: Optional[list[str]] = None) -> None:
             def finish() -> None:
                 if success:
                     status_labels[idx].config(text="Done!")
-                    append_log(f"Finished: {os.path.basename(input_path)}")
+                    append_log(f"Finished: {os.path.basename(input_path)} (audio tracks: {', '.join(track_order or [])})")
                 else:
                     status_labels[idx].config(text="Error")
                     append_log(f"Error processing {os.path.basename(input_path)}: {error}")
@@ -159,8 +160,8 @@ def gui_audio() -> None:
         # Launch conversions in parallel (one thread per file)
         def worker(idx: int, path: str) -> None:
             try:
-                run_audio_fix(path, gui_progress=make_progress_callback(idx))
-                on_file_done(idx, path, True)
+                track_order = run_audio_fix(path, gui_progress=make_progress_callback(idx))
+                on_file_done(idx, path, True, track_order=track_order)
             except Exception as e:
                 on_file_done(idx, path, False, e)
 
