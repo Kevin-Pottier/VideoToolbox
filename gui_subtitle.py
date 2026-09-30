@@ -7,6 +7,7 @@ import pysrt
 from deep_translator import GoogleTranslator
 # Import reusable GUI helpers for modern, DRY window/dialog creation
 from gui_helpers import apply_modern_theme, create_styled_frame, create_styled_label
+from utils import read_subtitle_text
 import threading 
 
 
@@ -38,19 +39,19 @@ def run_subtitle_translation():
     # Language codes for FFmpeg and Google Translate
     LANGUAGES = [
         ("English", "en"), ("French", "fr"), ("German", "de"), ("Spanish", "es"), ("Italian", "it"),
-        ("Portuguese", "pt"), ("Russian", "ru"), ("Chinese", "zh-cn"), ("Japanese", "ja"), ("Korean", "ko"),
+        ("Portuguese", "pt"), ("Russian", "ru"), ("Chinese", "zh-CN"), ("Japanese", "ja"), ("Korean", "ko"),
         ("Arabic", "ar"), ("Dutch", "nl"), ("Greek", "el"), ("Turkish", "tr"), ("Polish", "pl"), ("Czech", "cs"),
         ("Hungarian", "hu"), ("Romanian", "ro"), ("Bulgarian", "bg"), ("Ukrainian", "uk"), ("Serbian", "sr"),
         ("Croatian", "hr"), ("Slovak", "sk"), ("Swedish", "sv"), ("Finnish", "fi"), ("Danish", "da"), ("Norwegian", "no"),
-        ("Hebrew", "he"), ("Hindi", "hi"), ("Vietnamese", "vi"), ("Indonesian", "id"), ("Malay", "ms"), ("Thai", "th"),
+        ("Hebrew", "iw"), ("Hindi", "hi"), ("Vietnamese", "vi"), ("Indonesian", "id"), ("Malay", "ms"), ("Thai", "th"),
         ("Filipino", "tl"), ("Persian", "fa"), ("Urdu", "ur"), ("Bengali", "bn"), ("Slovenian", "sl"), ("Estonian", "et"),
         ("Latvian", "lv"), ("Lithuanian", "lt"), ("Georgian", "ka"), ("Armenian", "hy"), ("Azerbaijani", "az"),
         ("Albanian", "sq"), ("Macedonian", "mk"), ("Basque", "eu"), ("Catalan", "ca"), ("Galician", "gl"), ("Welsh", "cy"),
         ("Irish", "ga"), ("Scottish Gaelic", "gd"), ("Icelandic", "is"), ("Maltese", "mt"), ("Swahili", "sw"),
         ("Afrikaans", "af"), ("Zulu", "zu"), ("Xhosa", "xh"), ("Sesotho", "st"), ("Yoruba", "yo"), ("Igbo", "ig"),
         ("Hausa", "ha"), ("Somali", "so"), ("Amharic", "am"), ("Tigrinya", "ti"), ("Oromo", "om"), ("Kinyarwanda", "rw"),
-        ("Kirundi", "rn"), ("Lingala", "ln"), ("Luganda", "lg"), ("Shona", "sn"), ("Sesotho sa Leboa", "nso"),
-        ("Tswana", "tn"), ("Tsonga", "ts"), ("Venda", "ve"), ("Xitsonga", "xh")
+        ("Lingala", "ln"), ("Luganda", "lg"), ("Shona", "sn"), ("Sesotho sa Leboa", "nso"),
+        ("Tsonga", "ts")
     ]
 
     src_lang = tk.StringVar(value="en")
@@ -62,7 +63,7 @@ def run_subtitle_translation():
     def browse():
         root.lift()
         root.attributes('-topmost', True)
-        files = filedialog.askopenfilenames(title="Choose subtitle file(s)", filetypes=[("Subtitles", "*.srt *.ass")])
+        files = filedialog.askopenfilenames(title="Choose subtitle file(s)", filetypes=[("SubRip subtitles", "*.srt")])
         if files:
             subfile_paths.clear()
             subfile_paths.extend(root.tk.splitlist(files))
@@ -138,10 +139,14 @@ def run_subtitle_translation():
         progress_bar.pack(pady=(10, 0))
         status_label = create_styled_label(frame, "", style='TLabel', font=("Segoe UI", 10, "italic"))
         status_label.pack(pady=(4, 0))
-        def on_done():
-            messagebox.showinfo("Translation Complete", f"Translation completed!\nOutput saved as:\n{os.path.splitext(subfile)[0]}_translated.srt")
+        def on_done(failed):
+            messagebox.showinfo("Translation Complete", f"Translation completed!\nOutput saved as:\n{os.path.splitext(subfile)[0]}_translated.srt{failed_note(failed)}")
             root.destroy()
-        threading.Thread(target=translate_file, args=(subfile, progress_var, status_label, on_done), daemon=True).start()
+        def on_error(message):
+            status_label.config(text="Error")
+            messagebox.showerror("Translation Error", f"{os.path.basename(subfile)}:\n{message}")
+            ok_btn.config(state="normal")
+        threading.Thread(target=translate_file, args=(subfile, progress_var, status_label, on_done, on_error), daemon=True).start()
 
     def show_batch_progress():
         # New window for batch progress
@@ -167,19 +172,45 @@ def run_subtitle_translation():
             progress_bars.append((pvar, pbar))
             status_labels.append(slabel)
         # Start all translations in parallel (1 thread per file)
-        def on_file_done(idx, subfile):
-            def finish():
-                status_labels[idx].config(text="Done!")
-                messagebox.showinfo("Translation Complete", f"Translation completed!\nOutput saved as:\n{os.path.splitext(subfile)[0]}_translated.srt")
-                # If all done, close window
-                if all(status_labels[i].cget("text") == "Done!" for i in range(len(subfile_paths))):
-                    batch_win.destroy()
-                    root.destroy()
-            root.after(0, finish)
+        def close_if_all_finished():
+            if all(status_labels[i].cget("text") == "Done!" or status_labels[i].cget("text").startswith("Error")
+                   for i in range(len(subfile_paths))):
+                batch_win.destroy()
+                root.destroy()
+        def on_file_done(idx, subfile, failed):
+            status_labels[idx].config(text="Done!")
+            messagebox.showinfo("Translation Complete", f"Translation completed!\nOutput saved as:\n{os.path.splitext(subfile)[0]}_translated.srt{failed_note(failed)}")
+            close_if_all_finished()
+        def on_file_error(idx, subfile, message):
+            status_labels[idx].config(text=f"Error: {message.splitlines()[0]}")
+            messagebox.showerror("Translation Error", f"{os.path.basename(subfile)}:\n{message}")
+            close_if_all_finished()
         for idx, subfile in enumerate(subfile_paths):
-            threading.Thread(target=translate_file, args=(subfile, progress_bars[idx][0], status_labels[idx], lambda idx=idx, subfile=subfile: on_file_done(idx, subfile)), daemon=True).start()
+            threading.Thread(target=translate_file, args=(
+                subfile, progress_bars[idx][0], status_labels[idx],
+                lambda failed, idx=idx, subfile=subfile: on_file_done(idx, subfile, failed),
+                lambda message, idx=idx, subfile=subfile: on_file_error(idx, subfile, message)
+            ), daemon=True).start()
 
-    def translate_file(subfile, progress_var, status_label, on_done):
+    def failed_note(failed):
+        if not failed:
+            return ""
+        return f"\n\n⚠ {failed} line(s) could not be translated and were kept as is (see console)."
+
+    def translate_file(subfile, progress_var, status_label, on_done, on_error):
+        """
+        Translate one subtitle file in a worker thread. Tk is only touched through root.after:
+        on_done(number of lines left untranslated) or on_error(message) is called at the end.
+        """
+        try:
+            failed = translate_subtitles(subfile, progress_var, status_label)
+        except Exception as e:  # a dead thread would leave the progress window stuck
+            print(Fore.RED + f"Translation of {subfile} failed: {e}" + Style.RESET_ALL)
+            root.after(0, on_error, str(e) or type(e).__name__)
+            return
+        root.after(0, on_done, failed)
+
+    def translate_subtitles(subfile, progress_var, status_label):
         # Always use only the language code for GoogleTranslator
         source = src_lang.get()
         target = tgt_lang.get()
@@ -190,10 +221,16 @@ def run_subtitle_translation():
             target = target.split('(')[-1].split(')')[0].strip()
         print(Fore.GREEN + f"Selected subtitle file for translation: {subfile}" + Style.RESET_ALL)
         print(Fore.YELLOW + f"Translating from {source} to {target}" + Style.RESET_ALL)
-        subs = pysrt.open(subfile, encoding='utf-8')
+        text, encoding = read_subtitle_text(subfile)
+        if encoding != "utf-8-sig":
+            print(Fore.YELLOW + f"{os.path.basename(subfile)} is not UTF-8, read as {encoding}" + Style.RESET_ALL)
+        subs = pysrt.from_string(text)
+        if not subs:
+            raise ValueError("No subtitle found: is it a valid SubRip (.srt) file?")
         translator = GoogleTranslator(source=source, target=target)
         total = len(subs)
         results: List[str] = [""] * total
+        failed_lines: List[int] = []
         import time, concurrent.futures
         completed = [0]
         start_time = time.time()
@@ -207,6 +244,7 @@ def run_subtitle_translation():
             except Exception as e:
                 print(Fore.RED + f"Error translating: {e}" + Style.RESET_ALL)
                 translated = text
+                failed_lines.append(idx)
             results[idx] = translated
             def update():
                 completed[0] += 1
@@ -226,7 +264,10 @@ def run_subtitle_translation():
         for sub, translated in zip(subs, results):
             sub.text = translated
         subs.save(f"{os.path.splitext(subfile)[0]}_translated.srt", encoding='utf-8')
-        root.after(0, on_done)
+        return len(failed_lines)
 
     root.mainloop()
-    root.destroy()
+    try:
+        root.destroy()
+    except tk.TclError:
+        pass  # already destroyed once the translation is complete
