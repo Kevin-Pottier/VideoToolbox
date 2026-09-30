@@ -11,6 +11,10 @@ from dataclasses import dataclass, field
 from typing import Optional
 from colorama import Fore, Style
 
+# Text subtitle codecs that can be converted to mov_text, the only text subtitle codec of MP4.
+# Image based subtitles (PGS, DVD, DVB) cannot be stored in MP4.
+MP4_CONVERTIBLE_SUBTITLE_CODECS = {"subrip", "srt", "ass", "ssa", "webvtt", "mov_text", "text"}
+
 
 @dataclass
 class AudioTrackInfo:
@@ -284,6 +288,7 @@ def build_audio_mapping_options(
             - 'video_map': Video map string (e.g., "0:v")
             - 'audio_maps': List of audio map strings
             - 'subtitle_maps': List of subtitle map strings
+            - 'subtitle_codecs': Source codec of each subtitle map
             - 'disposition_args': List of disposition FFmpeg arguments
             - 'video_codec': Video codec string
             - 'audio_codec': Audio codec string
@@ -292,6 +297,7 @@ def build_audio_mapping_options(
     video_map = None
     audio_maps = []
     subtitle_maps = []
+    subtitle_codecs = []
     disposition_args = []
     needs_encoding = False
     
@@ -321,6 +327,7 @@ def build_audio_mapping_options(
     # Subtitle mapping
     if options.keep_subtitles and media_info.subtitle_tracks:
         subtitle_maps = [f"0:s:{i}" for i in range(len(media_info.subtitle_tracks))]
+        subtitle_codecs = [track.codec for track in media_info.subtitle_tracks]
     
     # Build disposition for default audio track
     if len(audio_maps) > 1 and options.default_track_index is not None:
@@ -356,6 +363,7 @@ def build_audio_mapping_options(
         "video_map": video_map,
         "audio_maps": audio_maps,
         "subtitle_maps": subtitle_maps,
+        "subtitle_codecs": subtitle_codecs,
         "disposition_args": disposition_args,
         "video_codec": video_codec,
         "audio_codec": audio_codec,
@@ -392,7 +400,14 @@ def build_ffmpeg_command(
         cmd.extend(["-map", audio_map])
     
     # Add subtitle maps
-    for sub_map in mapping_info.get("subtitle_maps", []):
+    to_mp4 = output_file.lower().endswith(".mp4")
+    subtitle_maps = mapping_info.get("subtitle_maps", [])
+    subtitle_codecs = mapping_info.get("subtitle_codecs") or [None] * len(subtitle_maps)
+    for sub_map, codec in zip(subtitle_maps, subtitle_codecs):
+        if to_mp4 and codec not in MP4_CONVERTIBLE_SUBTITLE_CODECS:
+            print(Fore.YELLOW + f"Subtitle track {sub_map} ({codec}) skipped: MP4 cannot store it, choose MKV to keep it."
+                  + Style.RESET_ALL)
+            continue
         cmd.extend(["-map", sub_map])
     
     # Add codecs
@@ -401,7 +416,8 @@ def build_ffmpeg_command(
     
     cmd.extend(["-c:v", video_codec])
     cmd.extend(["-c:a", audio_codec])
-    cmd.extend(["-c:s", "copy"])  # Always copy subtitles
+    # MP4 only stores text subtitles as mov_text, MKV takes every subtitle as it is
+    cmd.extend(["-c:s", "mov_text" if to_mp4 else "copy"])
     
     # Add disposition args
     disposition_args = mapping_info.get("disposition_args", [])
