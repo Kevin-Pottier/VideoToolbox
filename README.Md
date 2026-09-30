@@ -6,7 +6,7 @@ Modern, user-friendly Python GUI for compressing or upscaling one or multiple vi
 
 ## Features
 - Unified video compression and upscaling: select one or multiple videos, all in one workflow.
-- **Real-ESRGAN upscaling**: upscale videos to higher resolutions using state-of-the-art AI (Real-ESRGAN). Choose upscaling factor and model.
+- **Real-ESRGAN upscaling**: upscale videos to higher resolutions using state-of-the-art AI (Real-ESRGAN). Choose the target resolution (720p, 1080p, 4K).
 - Batch mode: see all progress bars in a scrollable window, with per-file ETA.
 - Modern UI: clean, dark-themed interface, clear fonts, colors, and spacing.
 - Subtitle handling: for each video, choose to ignore, softcode, or hardcode subtitles.
@@ -16,35 +16,37 @@ Modern, user-friendly Python GUI for compressing or upscaling one or multiple vi
 
 ## Requirements
 
-- Python 3.8–3.9 (for advanced features; not compatible with Python 3.10+)
+- Python 3.9 or newer
 - FFmpeg and FFprobe installed and available in your system PATH
-- **No need to install Real-ESRGAN Python dependencies or external repo!**
-- The upscaling feature now uses the portable `realesrgan-ncnn-vulkan.exe` tool (included in the `Tool/` folder), which works out-of-the-box on Windows and leverages your GPU automatically.
 - Python packages listed in `requirements.txt`:
   - `colorama` (for colored terminal output)
   - `pysrt` (for reading/writing subtitle files)
   - `deep-translator` (for Google Translate API)
   - `tkinter` (standard library)
+- For upscaling: the portable [Real-ESRGAN](https://github.com/xinntao/Real-ESRGAN) tool `realesrgan-ncnn-vulkan` (no Python/CUDA/PyTorch needed, it uses your GPU through Vulkan). It is **not stored in the repository**: `scripts/fetch_deps.py` downloads the official release (Windows, Linux or macOS) into the `Tool/` folder.
 
 ## Usage
 
 0. Clone the repo using: 
    ```bash
-   git clone https://github.com/Kevin-Pottier/VideoCompress.git
+   git clone https://github.com/Kevin-Pottier/VideoToolbox.git
    ```
 1. Install requirements:
    ```bash
    pip install -r requirements.txt
    ```
-2. Install FFmpeg and make sure it is in your system PATH.
-3. **Upscaling is ready out-of-the-box!** The `Tool/realesrgan-ncnn-vulkan.exe` executable is included and does not require any Python or CUDA setup. No need to install or configure anything else for upscaling.
-4. Run the app:
+2. Download the external tools and check that FFmpeg is installed (the official Real-ESRGAN archive, ~75 MB, is SHA-256 checked and only the files the app uses, ~40 MB, are kept):
+   ```bash
+   python scripts/fetch_deps.py
+   ```
+   If FFmpeg is missing, the script tells you how to install it (e.g. `winget install Gyan.FFmpeg` on Windows).
+3. Run the app:
    ```bash
    python main.py
    ```
-5. Choose a mode:
+4. Choose a mode:
    - **Video Compression**: Select one or more videos, configure subtitles, output format, and size. Batch mode shows a scrollable window with per-file progress and ETA.
-   - **Video Upscaling (Real-ESRGAN)**: Select one or more videos to upscale. Choose upscaling factor (e.g., 2x, 4x) and model. Progress bars and ETA are shown for each file. Output is saved in the selected folder.
+   - **Video Upscaling (Real-ESRGAN)**: Select one or more videos to upscale and choose the target resolution (720p, 1080p, 4K). Frames are upscaled x4 by Real-ESRGAN then resized to the target height, keeping the aspect ratio, frame rate and audio. A progress window shows each step with its ETA (closing it cancels). Output is saved in the selected folder. ⚠️ The temporary frames need a lot of disk space (hundreds of GB for a full movie): the app estimates it before starting.
    - **Subtitle Translation**: Translate a subtitle file between languages. The translation is fast (multi-threaded), the GUI remains responsive, and a progress bar shows real-time status. When finished, a message box confirms completion and the window closes automatically.
 
 ## Major Changes
@@ -73,13 +75,13 @@ You can create a standalone `.exe` for easy sharing and use on Windows:
    ```
 
 
-2. **Build the executable** (from the project folder):
+2. **Build the executable** (from the project folder, after `python scripts/fetch_deps.py`):
    ```bash
-   pyinstaller --onefile --add-data "main.py;." --add-data "gui_helpers.py;." --add-data "gui_film.py;." --add-data "gui_subtitle.py;." --add-data "compression.py;." --add-data "utils.py;." main.py
+   pyinstaller --onefile --add-data "Tool;Tool" main.py
    ```
    - `--onefile`: Bundle everything into a single .exe
-   - `--add-data "<file.py>;."`: Ensures each Python module is included (repeat for all .py files in the project)
-   - If you use additional data files (like themes), add them with more `--add-data` options.
+   - Python modules are found automatically from the imports, no need to list them.
+   - `--add-data "Tool;Tool"`: embeds the Real-ESRGAN executable and model used for upscaling.
 
 3. **Find your .exe** in the `dist` folder as `main.exe`. You can rename it if you wish.
 
@@ -91,6 +93,12 @@ You can create a standalone `.exe` for easy sharing and use on Windows:
 
 ## Changelog
 
+
+### September 2026
+- Repository made lighter: the Real-ESRGAN binaries and models (~72 MB) are no longer versioned, `scripts/fetch_deps.py` downloads them.
+- `requirements.txt` reduced to the packages actually used (no more PyTorch/BasicSR/OpenCV), Python 3.10+ supported.
+- Upscaling fixed: crash at startup, frame naming, frame rate (audio desync), x4 model scale, videos without audio, anamorphic sources, thread-safe progress window, cancellation, cleanup of temporary frames.
+- Compression: the video bitrate budget now uses the re-encoded audio bitrate (192 kbps per track) instead of the source one, with a check for too small target sizes.
 
 ### July 2025
 - Subtitle translation workflow now fully implemented:
@@ -109,8 +117,8 @@ You can create a standalone `.exe` for easy sharing and use on Windows:
 ## Troubleshooting
 
 - Only third-party packages (like `colorama`) are listed in `requirements.txt`. Standard Python libraries such as `os`, `subprocess`, and `tkinter` are included with every Python installation and do not need to be installed separately. If you encounter errors about missing standard libraries, your Python installation may be broken—reinstall Python from the official website to fix this.
-- If you see errors related to Real-ESRGAN or its dependencies, make sure you are using Python 3.8 or 3.9. Real-ESRGAN is not compatible with Python 3.10 or newer.
-- For upscaling, if you see errors about missing `realesrgan-ncnn-vulkan.exe`, make sure the `Tool/` folder is present and contains the executable. No Python dependencies are needed for upscaling.
+- For upscaling, if you see errors about missing `realesrgan-ncnn-vulkan`, run `python scripts/fetch_deps.py` (add `--force` to download it again). No Python dependencies are needed for upscaling.
+- On Linux, Real-ESRGAN needs a Vulkan driver (e.g. `sudo apt install libvulkan1 mesa-vulkan-drivers`).
 
 ---
 Feel free to modify the project for your own needs!
