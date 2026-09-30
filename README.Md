@@ -47,7 +47,10 @@ Modern, user-friendly Python GUI for compressing or upscaling one or multiple vi
 4. Choose a mode:
    - **Video Compression**: Select one or more videos, configure subtitles, output format, and size. Batch mode shows a scrollable window with per-file progress and ETA.
    - **Video Upscaling (Real-ESRGAN)**: Select one or more videos to upscale and choose the target resolution (720p, 1080p, 4K). Frames are upscaled x4 by Real-ESRGAN then resized to the target height, keeping the aspect ratio, frame rate and audio. A progress window shows each step with its ETA (closing it cancels). Output is saved in the selected folder. ⚠️ The temporary frames need a lot of disk space (hundreds of GB for a full movie): the app estimates it before starting.
-   - **Subtitle Translation**: Translate a subtitle file between languages. The translation is fast (multi-threaded), the GUI remains responsive, and a progress bar shows real-time status. When finished, a message box confirms completion and the window closes automatically.
+   - **Subtitle Translation**: Translate one or more `.srt` files (UTF-8 or Windows-1252) between languages. The translation is fast (multi-threaded), the GUI remains responsive, and a progress bar shows real-time status. When finished, a message box confirms completion (and reports the lines that could not be translated) and the window closes automatically.
+   - **Audio fix for stereo**: Down-mix every audio track to stereo AAC. All tracks, subtitles and attachments are kept; French audio tracks are moved first and the first one becomes the default track (detected from the language tag, or from titles such as `VFF`/`VFQ`).
+   - **Add subtitles**: Add a subtitle file (`.srt`/`.ass`, from any folder, any encoding) as a new track, keeping the existing ones, or burn it into the video.
+   - **Audio Tracks Management**: Choose which audio tracks to keep and the default one. For MP4 output, text subtitles are converted to `mov_text` and image subtitles (PGS, DVD) are skipped: choose MKV to keep them.
 
 ## Major Changes
 - Unified single and batch video compression into one workflow.
@@ -99,6 +102,10 @@ You can create a standalone `.exe` for easy sharing and use on Windows:
 - `requirements.txt` reduced to the packages actually used (no more PyTorch/BasicSR/OpenCV), Python 3.10+ supported.
 - Upscaling fixed: crash at startup, frame naming, frame rate (audio desync), x4 model scale, videos without audio, anamorphic sources, thread-safe progress window, cancellation, cleanup of temporary frames.
 - Compression: the video bitrate budget now uses the re-encoded audio bitrate (192 kbps per track) instead of the source one, with a check for too small target sizes.
+- Subtitle translation: fixed language codes (Chinese, Hebrew), Windows-1252 `.srt` files supported, errors reported instead of a stuck window.
+- Compression and "Add subtitles": the subtitle file can be in any folder, with any name and encoding; "Add subtitles" keeps the existing subtitle tracks.
+- Audio Tracks Management: MP4 output works with SRT/ASS/PGS subtitles in the source.
+- Audio fix: every audio track is kept (only one was), French tracks first and default.
 
 ### July 2025
 - Subtitle translation workflow now fully implemented:
