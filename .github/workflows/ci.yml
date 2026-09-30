@@ -8,6 +8,7 @@ on:
 jobs:
   lint:
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
@@ -19,6 +20,8 @@ jobs:
   tests:
     name: tests (${{ matrix.os }}, Python ${{ matrix.python }})
     runs-on: ${{ matrix.os }}
+    # A stuck package installation (seen with apt-get) fails after 20 minutes instead of 6 hours
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
