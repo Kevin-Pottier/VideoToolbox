@@ -1,8 +1,10 @@
 
+import concurrent.futures
 import tkinter as tk
 from tkinter import filedialog, messagebox
 from colorama import Fore, Style
 import os
+import time
 import pysrt
 from deep_translator import GoogleTranslator
 # Import reusable GUI helpers for modern, DRY window/dialog creation
@@ -28,6 +30,80 @@ LANGUAGES = [
     ("Lingala", "ln"), ("Luganda", "lg"), ("Shona", "sn"), ("Sesotho sa Leboa", "nso"),
     ("Tsonga", "ts")
 ]
+
+TRANSLATION_WORKERS = 4  # parallel requests: more makes Google limit (or block) the requests sooner
+TRANSLATION_ATTEMPTS = 4  # per text, with a delay doubling between attempts (1 s, 2 s, 4 s)
+RETRY_BASE_DELAY = 1.0
+MAX_CONSECUTIVE_FAILURES = 10  # texts failing in a row: Google is limiting or blocking the requests
+
+
+class TranslationBlocked(RuntimeError):
+    pass
+
+
+def translate_with_retry(translate, text, attempts=TRANSLATION_ATTEMPTS, base_delay=RETRY_BASE_DELAY, sleep=time.sleep):
+    """translate(text), retried with an exponential backoff; the last error is raised if every attempt fails."""
+    if not text.strip():
+        return text  # nothing to translate (the translator rejects empty texts)
+    for attempt in range(attempts):
+        try:
+            return translate(text)
+        except Exception:
+            if attempt == attempts - 1:
+                raise
+            sleep(base_delay * 2 ** attempt)
+
+
+def translate_lines(lines, make_translator, on_progress=None, workers=TRANSLATION_WORKERS,
+                    max_consecutive_failures=MAX_CONSECUTIVE_FAILURES, **retry_options):
+    """
+    Translate subtitle texts in parallel.
+    - make_translator() creates a translator (an object with translate(text)). Each worker thread gets
+      its own: deep-translator's GoogleTranslator stores the text of the request in the instance, so a
+      shared one can send the text of another thread and give a line the translation of another one.
+    - identical texts ("Yes.", "Thank you."...) are translated once
+    - on_progress(number of lines done) is called from the worker threads
+    Returns:
+        tuple: (translated lines, number of lines kept as they were because their translation failed)
+    Raises:
+        TranslationBlocked: when max_consecutive_failures texts fail in a row
+    """
+    positions = {}
+    for index, text in enumerate(lines):
+        positions.setdefault(text, []).append(index)
+    translations = {}
+    failed = []
+    lock = threading.Lock()
+    consecutive_failures = [0]
+    blocked = threading.Event()
+    local = threading.local()
+
+    def translate_one(text):
+        if blocked.is_set():
+            return
+        if not hasattr(local, "translator"):
+            local.translator = make_translator()
+        try:
+            translations[text] = translate_with_retry(local.translator.translate, text, **retry_options)
+            with lock:
+                consecutive_failures[0] = 0
+        except Exception as e:
+            print(Fore.RED + f"Error translating {text!r}: {e}" + Style.RESET_ALL)
+            translations[text] = text
+            with lock:
+                failed.append(text)
+                consecutive_failures[0] += 1
+                if consecutive_failures[0] >= max_consecutive_failures:
+                    blocked.set()
+        if on_progress:
+            on_progress(len(positions[text]))
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
+        list(executor.map(translate_one, positions))
+    if blocked.is_set():
+        raise TranslationBlocked(f"Google Translate stopped answering ({max_consecutive_failures} failures in a row): "
+                                 "it may be limiting or blocking the requests. Try again later.")
+    return [translations[text] for text in lines], sum(len(positions[text]) for text in failed)
 
 
 def run_subtitle_translation():
@@ -228,44 +304,31 @@ def run_subtitle_translation():
         subs = pysrt.from_string(text)
         if not subs:
             raise ValueError("No subtitle found: is it a valid SubRip (.srt) file?")
-        translator = GoogleTranslator(source=source, target=target)
+        GoogleTranslator(source=source, target=target)  # reports an unsupported language before starting
         total = len(subs)
-        results: List[str] = [""] * total
-        failed_lines: List[int] = []
-        import time, concurrent.futures
         completed = [0]
         start_time = time.time()
-        def update_progress(count):
-            percent = int(100.0 * count / float(total))
+        def update(count):
+            # Runs in the Tk thread (scheduled with root.after)
+            completed[0] += count
+            percent = int(100.0 * completed[0] / total)
             progress_var.set(percent)
-            status_label.config(text=f"Translating... {percent}% ({count}/{total})")
-        def translate_and_update(idx, text):
-            try:
-                translated = translator.translate(text)
-            except Exception as e:
-                print(Fore.RED + f"Error translating: {e}" + Style.RESET_ALL)
-                translated = text
-                failed_lines.append(idx)
-            results[idx] = translated
-            def update():
-                completed[0] += 1
-                update_progress(completed[0])
-                # Print ETA in terminal
-                elapsed = time.time() - start_time
-                if completed[0] > 0 and completed[0] < total:
-                    eta = elapsed / completed[0] * (total - completed[0])
-                    mins, secs = divmod(int(eta), 60)
-                    print(f"[{os.path.basename(subfile)}] {completed[0]}/{total} - ETA: {mins:02d}:{secs:02d}", end='\r')
-                elif completed[0] == total:
-                    print(f"[{os.path.basename(subfile)}] 100% - Done!{' '*20}")
-            root.after(0, update)
-        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
-            futures = [executor.submit(translate_and_update, idx, sub.text) for idx, sub in enumerate(subs)]
-            concurrent.futures.wait(futures)
-        for sub, translated in zip(subs, results):
-            sub.text = translated
+            status_label.config(text=f"Translating... {percent}% ({completed[0]}/{total})")
+            elapsed = time.time() - start_time
+            if completed[0] < total:
+                mins, secs = divmod(int(elapsed / completed[0] * (total - completed[0])), 60)
+                print(f"[{os.path.basename(subfile)}] {completed[0]}/{total} - ETA: {mins:02d}:{secs:02d}", end='\r')
+            else:
+                print(f"[{os.path.basename(subfile)}] 100% - Done!{' '*20}")
+        translated, failed = translate_lines(
+            [sub.text for sub in subs],
+            lambda: GoogleTranslator(source=source, target=target),
+            on_progress=lambda count: root.after(0, update, count),
+        )
+        for sub, new_text in zip(subs, translated):
+            sub.text = new_text
         subs.save(f"{os.path.splitext(subfile)[0]}_translated.srt", encoding='utf-8')
-        return len(failed_lines)
+        return failed
 
     root.mainloop()
     try:

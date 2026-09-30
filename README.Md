@@ -120,6 +120,7 @@ You can create a standalone `.exe` for easy sharing and use on Windows:
 - Audio fix: every audio track is kept (only one was), French tracks first and default.
 - Compression in two passes: the output size now matches the target (98% of it with the 2% margin, a single pass could exceed it by several %); the passes keep the source timestamps so that they encode exactly the same frames (otherwise x264 failed or hung on MKV sources), a stuck ffmpeg is killed after 5 minutes without output, and a failed encode leaves no broken file.
 - ffprobe is called once per file, its errors are reported and its output is read as UTF-8 (some accented file names or titles crashed on Windows).
+- Subtitle translation: each worker thread has its own translator (a shared one could give a line the translation of another line), identical lines are translated once, failed requests are retried with an increasing delay, and the translation stops with a clear message when Google keeps refusing the requests.
 
 ### July 2025
 - Subtitle translation workflow now fully implemented:
