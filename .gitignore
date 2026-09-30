@@ -17,6 +17,8 @@ CompressMovie.py
 dist/
 build/
 __pycache__/
+.pytest_cache/
+.ruff_cache/
 *.pyc
 *.pyo
 *.log

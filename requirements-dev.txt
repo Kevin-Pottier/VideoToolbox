@@ -1,0 +1,5 @@
+-r requirements.txt
+
+# Tests and lint (see the Development section of the README)
+pytest>=7
+ruff

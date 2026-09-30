@@ -66,6 +66,46 @@ def _track_label(track) -> str:
         label += f" ({track.title})"
     return label
 
+def build_audio_fix_command(input_path: str, output_file: str, media, audio_channels: int = 2,
+                            sample_rate: int = 48_000, audio_bitrate: str = "160k"):
+    """
+    Build the ffmpeg command of the audio fix: every audio track down-mixed, French tracks first.
+    Returns:
+        tuple: (command, audio tracks in output order, whether a French track was found)
+    """
+    # French tracks first. Without -map ffmpeg would keep a single audio track and at most one subtitle.
+    audio_tracks = french_first(media.audio_tracks)
+    has_french = is_french_track(audio_tracks[0])
+    ffmpeg_cmd = ["ffmpeg", "-i", input_path, "-map", "0:v?"]
+    for track in audio_tracks:
+        ffmpeg_cmd += ["-map", f"0:{track.stream_index}"]
+    ffmpeg_cmd += ["-map", "0:s?"]
+    if os.path.splitext(output_file)[1].lower() == ".mkv":
+        ffmpeg_cmd += ["-map", "0:t?"]  # attachments (fonts of ASS subtitles)
+    ffmpeg_cmd += [
+        "-c", "copy",
+        "-c:a", "aac",
+        "-ac", str(audio_channels),
+        "-ar", str(sample_rate),
+        "-b:a", audio_bitrate,
+    ]
+    if has_french:
+        # The first French track becomes the default one, the other flags of each track are kept
+        for out_index, track in enumerate(audio_tracks):
+            should_be_default = out_index == 0
+            if track.is_default != should_be_default:
+                flags = [flag for flag in track.disposition_flags if flag in KEPT_DISPOSITION_FLAGS]
+                if should_be_default:
+                    flags.insert(0, "default")
+                ffmpeg_cmd += [f"-disposition:a:{out_index}", "+".join(flags) or "0"]
+    ffmpeg_cmd += [
+        "-movflags", "+faststart",
+        output_file,
+        "-y"
+    ]
+    return ffmpeg_cmd, audio_tracks, has_french
+
+
 def run_audio_fix(file_path: str,
                   audio_channels: int = 2,
                   sample_rate: int = 48_000,
@@ -120,36 +160,8 @@ def run_audio_fix(file_path: str,
     if duration is None:
         print(Fore.RED + f"Could not determine video duration for '{file_path}'." + Style.RESET_ALL)
 
-    # French tracks first. Without -map ffmpeg would keep a single audio track and at most one subtitle.
-    audio_tracks = french_first(media.audio_tracks)
-    has_french = is_french_track(audio_tracks[0])
-    ffmpeg_cmd = ["ffmpeg", "-i", abs_path, "-map", "0:v?"]
-    for track in audio_tracks:
-        ffmpeg_cmd += ["-map", f"0:{track.stream_index}"]
-    ffmpeg_cmd += ["-map", "0:s?"]
-    if output_ext.lower() == ".mkv":
-        ffmpeg_cmd += ["-map", "0:t?"]  # attachments (fonts of ASS subtitles)
-    ffmpeg_cmd += [
-        "-c", "copy",
-        "-c:a", "aac",
-        "-ac", str(audio_channels),
-        "-ar", str(sample_rate),
-        "-b:a", audio_bitrate,
-    ]
-    if has_french:
-        # The first French track becomes the default one, the other flags of each track are kept
-        for out_index, track in enumerate(audio_tracks):
-            should_be_default = out_index == 0
-            if track.is_default != should_be_default:
-                flags = [flag for flag in track.disposition_flags if flag in KEPT_DISPOSITION_FLAGS]
-                if should_be_default:
-                    flags.insert(0, "default")
-                ffmpeg_cmd += [f"-disposition:a:{out_index}", "+".join(flags) or "0"]
-    ffmpeg_cmd += [
-        "-movflags", "+faststart",
-        output_file,
-        "-y"
-    ]
+    ffmpeg_cmd, audio_tracks, has_french = build_audio_fix_command(
+        abs_path, output_file, media, audio_channels, sample_rate, audio_bitrate)
     track_order = [_track_label(track) for track in audio_tracks]
 
     print(Fore.YELLOW + f"\nRunning audio fix for: {os.path.basename(file_path)}" + Style.RESET_ALL)

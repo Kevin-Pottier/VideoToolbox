@@ -14,6 +14,16 @@ AUDIO_BITRATE = 192000  # bps per audio track: used in the ffmpeg command and in
 SIZE_MARGIN = 0.02  # share of the target size kept for the container overhead and the encoder deviation
 MIN_VIDEO_BITRATE_KBPS = 100
 
+def compute_video_bitrate_kbps(max_size_gb, duration, n_audio_tracks):
+    """
+    Video bitrate (kbps) that makes the output fit in max_size_gb, given the audio
+    tracks encoded at AUDIO_BITRATE and the SIZE_MARGIN. Can be negative if the size is too small.
+    """
+    target_bits = max_size_gb * 1024 * 1024 * 1024 * 8 * (1 - SIZE_MARGIN)  # in bits
+    audio_bits_total = AUDIO_BITRATE * n_audio_tracks * duration  # in bits
+    video_bitrate = (target_bits - audio_bits_total) / duration  # in bits per second
+    return int(video_bitrate / 1000)  # in kbps
+
 def run_compression(file_path, sub_option, sub_file, ext, max_size_gb, gui_progress=None) -> None:
     """
     Compress a video file using FFmpeg, with optional subtitle handling and GUI/CLI progress bars.
@@ -63,12 +73,7 @@ def run_compression(file_path, sub_option, sub_file, ext, max_size_gb, gui_progr
     print(f"Duration: {duration:.2f} s")
     print(f"Audio: {n_audio_out} track(s) encoded at {AUDIO_BITRATE // 1000} kbps")
 
-    # Bitrate calculation
-    target_bits = max_size_gb * 1024 * 1024 * 1024 * 8 * (1 - SIZE_MARGIN)  # in bits
-    audio_bits_total: float = AUDIO_BITRATE * n_audio_out * duration # in bits
-    video_bits_total = target_bits - audio_bits_total # in bits
-    video_bitrate = video_bits_total / duration # in bits per second
-    video_bitrate_kbps = int(video_bitrate / 1000) # in kbps
+    video_bitrate_kbps = compute_video_bitrate_kbps(max_size_gb, duration, n_audio_out)
 
     print(f"Target Video Bitrate: {video_bitrate_kbps} kbps")
     if video_bitrate_kbps < MIN_VIDEO_BITRATE_KBPS:
