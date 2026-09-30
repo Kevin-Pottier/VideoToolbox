@@ -1,26 +1,8 @@
 import os
-import subprocess
 
 # Tried in this order: UTF-8 (with or without BOM), then Windows-1252, very common for
 # French .srt files. Latin-1 never fails and is the last resort.
 SUBTITLE_ENCODINGS = ("utf-8-sig", "cp1252", "latin-1")
-
-
-def ffprobe(cmd):
-    """
-    Run ffprobe with the given command and return its output as a string.
-    Args:
-        cmd (list): List of command arguments for ffprobe.
-    Returns:
-        str: ffprobe output.
-    """
-    result = subprocess.run(
-        cmd,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        universal_newlines=True
-    )
-    return result.stdout.strip()
 
 
 def read_subtitle_text(path):

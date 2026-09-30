@@ -21,7 +21,8 @@ def add_subtitles_to_video(video_path, sub_option, sub_file, gui_progress=None):
         sub_file (str): Path to the subtitle file.
         gui_progress (callable): Optional callback for progress updates (percent, mins, secs).
     """
-    from utils import ffprobe, prepare_subtitle_file
+    from audio_tracks import ffprobe_streams
+    from utils import prepare_subtitle_file
     
     video_name = os.path.basename(video_path)
     video_ext = os.path.splitext(video_path)[1]
@@ -36,13 +37,8 @@ def add_subtitles_to_video(video_path, sub_option, sub_file, gui_progress=None):
     
     # Get video duration for progress
     try:
-        duration_str = ffprobe([
-            "ffprobe", "-v", "error", "-show_entries",
-            "format=duration", "-of",
-            "default=noprint_wrappers=1:nokey=1", video_path
-        ])
-        duration = float(duration_str)
-    except Exception:
+        duration = ffprobe_streams(video_path).duration or 0
+    except RuntimeError:
         duration = 0
     
     # The subtitle file is copied as UTF-8 under a plain name into a temporary folder, used as

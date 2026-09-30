@@ -5,7 +5,8 @@ import tempfile
 from tkinter.ttk import Frame
 from tkinter.ttk import Label
 from colorama import Fore, Style
-from utils import ffprobe, prepare_subtitle_file
+from audio_tracks import ffprobe_streams
+from utils import prepare_subtitle_file
 import subprocess
 # Import reusable GUI helpers for modern, DRY window/dialog creation
 from gui_helpers import apply_modern_theme, create_styled_frame, create_styled_label
@@ -34,39 +35,20 @@ def run_compression(file_path, sub_option, sub_file, ext, max_size_gb, gui_progr
         ext (str): Output file extension ('mp4' or 'mkv').
         max_size_gb (float): Target maximum file size in GB.
     """
-    def ffmpeg_escape(path):
-        """
-        Escape a file path for FFmpeg compatibility (Windows).
-        Args:
-            path (str): The file path to escape.
-        Returns:
-            str: Escaped path.
-        """
-        # Use forward slashes and escape special chars for FFmpeg
-        return os.path.abspath(path).replace("\\", "/").replace(":", "\\:")
-
-    # Metadata extraction
-    duration_str: str = ffprobe([
-        "ffprobe", "-v", "error", "-show_entries",
-        "format=duration", "-of",
-        "default=noprint_wrappers=1:nokey=1", file_path
-    ])
+    # Metadata extraction (a single ffprobe call)
     try:
-        duration = float(duration_str)
-        if duration <= 0:
-            raise ValueError
-    except Exception:
-        print(Fore.RED + f"Could not determine video duration (got '{duration_str}'). Aborting." + Style.RESET_ALL)
+        media = ffprobe_streams(file_path)
+    except RuntimeError as e:
+        print(Fore.RED + f"Could not read {file_path}: {e}. Aborting." + Style.RESET_ALL)
+        return
+    duration = media.duration
+    if not duration or duration <= 0:
+        print(Fore.RED + "Could not determine video duration. Aborting." + Style.RESET_ALL)
         return
 
     # The audio is re-encoded at AUDIO_BITRATE: the budget depends on the number of output tracks,
     # not on the source bitrate
-    audio_streams: str = ffprobe([
-        "ffprobe", "-v", "error", "-select_streams", "a",
-        "-show_entries", "stream=index", "-of", "csv=p=0",
-        file_path
-    ])
-    n_audio_source = len(audio_streams.split())
+    n_audio_source = len(media.audio_tracks)
     # 'soft' keeps every audio track (-map 0:a?), otherwise ffmpeg selects a single one
     n_audio_out = n_audio_source if sub_option == "soft" else min(n_audio_source, 1)
 

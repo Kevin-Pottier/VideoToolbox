@@ -1,4 +1,3 @@
-import json
 import math
 import os
 import queue
@@ -13,7 +12,7 @@ from tkinter import filedialog, messagebox, ttk
 from typing import List, Tuple
 
 from gui_helpers import apply_modern_theme, create_styled_frame, create_styled_label, create_styled_button
-from utils import ffprobe
+from audio_tracks import ffprobe_streams
 
 # Real-ESRGAN is not stored in the repository: `python scripts/fetch_deps.py` downloads it into Tool/
 TOOL_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "Tool")
@@ -49,24 +48,21 @@ def probe_video(filepath):
     Returns:
         dict or None: width, height, fps (ffmpeg rational string) and duration (s).
     """
-    out = ffprobe([
-        "ffprobe", "-v", "error", "-select_streams", "v:0",
-        "-show_entries", "stream=width,height,avg_frame_rate,r_frame_rate:format=duration",
-        "-of", "json", filepath
-    ])
     try:
-        data = json.loads(out)
-        stream = data["streams"][0]
-        width, height = int(stream["width"]), int(stream["height"])
-        duration = float(data["format"]["duration"])
-    except (ValueError, KeyError, IndexError, TypeError):
+        media = ffprobe_streams(filepath)
+    except RuntimeError as e:
+        print(f"Could not read {filepath}: {e}")
         return None
+    if not media.video_tracks:
+        return None
+    video = media.video_tracks[0]  # the stream extracted with -map 0:v:0
+    duration = media.duration or 0
     # The same rate is used to extract and to recompose the frames,
     # so the output keeps the source duration and the audio stays in sync.
-    fps = next((r for r in (stream.get("avg_frame_rate"), stream.get("r_frame_rate")) if _rate_to_float(r) > 0), None)
-    if fps is None or duration <= 0:
+    fps = next((r for r in (video.avg_frame_rate, video.r_frame_rate) if _rate_to_float(r) > 0), None)
+    if not video.width or not video.height or fps is None or duration <= 0:
         return None
-    return {"width": width, "height": height, "fps": fps, "duration": duration}
+    return {"width": video.width, "height": video.height, "fps": fps, "duration": duration}
 
 
 def estimate_frame_count(info):

@@ -101,6 +101,8 @@ class VideoTrackInfo:
     height: Optional[int] = None
     bit_rate: Optional[int] = None
     duration: Optional[float] = None
+    avg_frame_rate: Optional[str] = None  # ffprobe rational, e.g. '24000/1001'
+    r_frame_rate: Optional[str] = None
 
 
 @dataclass
@@ -149,7 +151,7 @@ def ffprobe_streams(file_path: str) -> MediaFileInfo:
     """
     cmd = [
         "ffprobe",
-        "-v", "quiet",
+        "-v", "error",  # errors only, reported in the RuntimeError
         "-print_format", "json",
         "-show_format",
         "-show_streams",
@@ -167,7 +169,7 @@ def ffprobe_streams(file_path: str) -> MediaFileInfo:
         )
         
         if result.returncode != 0:
-            raise RuntimeError(f"ffprobe failed: {result.stderr}")
+            raise RuntimeError(f"ffprobe failed: {result.stderr.strip() or 'exit code ' + str(result.returncode)}")
         
         data = json.loads(result.stdout)
         
@@ -202,7 +204,9 @@ def ffprobe_streams(file_path: str) -> MediaFileInfo:
                 width=stream.get("width"),
                 height=stream.get("height"),
                 bit_rate=int(stream["bit_rate"]) if stream.get("bit_rate") else None,
-                duration=float(stream["duration"]) if stream.get("duration") else None
+                duration=float(stream["duration"]) if stream.get("duration") else None,
+                avg_frame_rate=stream.get("avg_frame_rate"),
+                r_frame_rate=stream.get("r_frame_rate")
             ))
             
         elif codec_type == "audio":

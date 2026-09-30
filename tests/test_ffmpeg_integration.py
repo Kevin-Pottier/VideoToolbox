@@ -192,3 +192,23 @@ def test_cancelled_upscale_leaves_no_file(tmp_path, fake_realesrgan):
     with pytest.raises(gui_upscale.UpscaleCancelled):
         gui_upscale.upscale_video(str(src), gui_upscale.probe_video(str(src)), 720, str(outdir), noop, cancel)
     assert os.listdir(outdir) == []
+
+
+def test_ffprobe_streams_reports_an_unreadable_file(tmp_path):
+    import audio_tracks
+    bad = tmp_path / "not a video.mkv"
+    bad.write_bytes(b"garbage")
+    with pytest.raises(RuntimeError, match="ffprobe failed: .+"):
+        audio_tracks.ffprobe_streams(str(bad))
+
+
+def test_ffprobe_streams_reads_utf8_titles_and_frame_rates(tmp_path):
+    # "Á" is encoded as C3 81 in UTF-8: 0x81 is undefined in Windows-1252
+    import audio_tracks
+    src = tmp_path / "titles.mkv"
+    run_ffmpeg(*lavfi_video(rate="24000/1001"), *lavfi_audio(), "-map", "0", "-map", "1",
+               "-c:v", "libx264", "-c:a", "aac", "-metadata:s:a:0", "title=Á la française", str(src))
+    info = audio_tracks.ffprobe_streams(str(src))
+    assert info.audio_tracks[0].title == "Á la française"
+    assert info.video_tracks[0].avg_frame_rate == "24000/1001"
+    assert info.duration == pytest.approx(1, abs=0.1)
