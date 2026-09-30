@@ -22,6 +22,7 @@ progress bars for each file.  Upon completion, output files named
 """
 
 import os
+import queue
 import threading
 import tkinter as tk
 from tkinter import filedialog, messagebox
@@ -128,34 +129,50 @@ def gui_audio() -> None:
             progress_bars.append(pbar)
             status_labels.append(slabel)
 
+        # The worker threads never touch Tk: they fill this queue, applied by poll() in the Tk thread
+        events: "queue.Queue[tuple]" = queue.Queue()
+
         def on_file_done(idx: int, input_path: str, success: bool, error: Optional[Exception] = None,
                          track_order: Optional[list[str]] = None) -> None:
-            def finish() -> None:
-                if success:
-                    status_labels[idx].config(text="Done!")
-                    append_log(f"Finished: {os.path.basename(input_path)} (audio tracks: {', '.join(track_order or [])})")
-                else:
-                    status_labels[idx].config(text="Error")
-                    append_log(f"Error processing {os.path.basename(input_path)}: {error}")
-                # If all finished, re‑enable buttons and close progress window
-                if all(status_labels[i].cget("text") in ("Done!", "Error") for i in range(len(files_to_process))):
-                    convert_btn.config(state="normal")
-                    add_btn.config(state="normal")
-                    clear_btn.config(state="normal")
-                    progress_win.destroy()
-            root.after(0, finish)
+            events.put(("done", idx, input_path, success, error, track_order))
+
+        def finish(idx: int, input_path: str, success: bool, error: Optional[Exception],
+                   track_order: Optional[list[str]]) -> bool:
+            """Show the result of one file; True once every file is finished."""
+            if success:
+                status_labels[idx].config(text="Done!")
+                append_log(f"Finished: {os.path.basename(input_path)} (audio tracks: {', '.join(track_order or [])})")
+            else:
+                status_labels[idx].config(text="Error")
+                append_log(f"Error processing {os.path.basename(input_path)}: {error}")
+            return all(status_labels[i].cget("text") in ("Done!", "Error") for i in range(len(files_to_process)))
 
         def make_progress_callback(idx: int) -> Callable[[float, Optional[int], Optional[int]], None]:
             def callback(percent: float, mins: Optional[int], secs: Optional[int]) -> None:
-                try:
-                    progress_vars[idx].set(percent)
-                    if mins is not None and secs is not None:
-                        status_labels[idx].config(text=f"{percent:5.1f}% | ETA: {mins:02d}:{secs:02d}")
-                    else:
-                        status_labels[idx].config(text=f"{percent:5.1f}% | ETA: --:--")
-                except Exception:
-                    pass
+                events.put(("progress", idx, percent, mins, secs))
             return callback
+
+        def show_progress(idx: int, percent: float, mins: Optional[int], secs: Optional[int]) -> None:
+            progress_vars[idx].set(percent)
+            eta = f"{mins:02d}:{secs:02d}" if mins is not None and secs is not None else "--:--"
+            status_labels[idx].config(text=f"{percent:5.1f}% | ETA: {eta}")
+
+        def poll() -> None:
+            try:
+                while True:
+                    event = events.get_nowait()
+                    if event[0] == "progress":
+                        show_progress(*event[1:])
+                    elif finish(*event[1:]):
+                        # Every file is finished: re‑enable the buttons and close the progress window
+                        convert_btn.config(state="normal")
+                        add_btn.config(state="normal")
+                        clear_btn.config(state="normal")
+                        progress_win.destroy()
+                        return
+            except queue.Empty:
+                pass
+            root.after(200, poll)
 
         # Launch conversions in parallel (one thread per file)
         def worker(idx: int, path: str) -> None:
@@ -167,6 +184,7 @@ def gui_audio() -> None:
 
         for i, path in enumerate(files_to_process):
             threading.Thread(target=worker, args=(i, path), daemon=True).start()
+        poll()
 
     # Buttons
     btn_frame = create_styled_frame(frame)

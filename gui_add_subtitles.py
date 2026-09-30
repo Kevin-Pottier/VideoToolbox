@@ -95,7 +95,9 @@ def add_subtitles_to_video(video_path, sub_option, sub_file, gui_progress=None):
 def _run_with_progress(ffmpeg_cmd, cwd, duration, gui_progress):
     """Run ffmpeg, forward its progress to gui_progress(percent, mins, secs), return the exit code."""
     import time
-    proc = subprocess.Popen(ffmpeg_cmd, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
+    # ffmpeg writes UTF-8 (file names): the locale encoding (cp1252 on Windows) could fail on it
+    proc = subprocess.Popen(ffmpeg_cmd, cwd=cwd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+                            encoding="utf-8", errors="replace")
     start_time = time.time()
     
     while True:

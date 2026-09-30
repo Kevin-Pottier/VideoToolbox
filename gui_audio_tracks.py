@@ -9,6 +9,7 @@ import tkinter as tk
 from tkinter import filedialog, messagebox
 from colorama import Fore, Style
 import os
+import queue
 import threading
 
 # Import reusable GUI helpers
@@ -460,29 +461,27 @@ def show_progress_window(input_file: str, output_file: str, ffmpeg_cmd: list, du
     )
     time_label.pack()
     
+    events = queue.Queue()  # the worker thread never touches Tk: it only fills this queue
+
     def run_ffmpeg():
-        """Run FFmpeg in background thread and update progress."""
+        """Run FFmpeg in background thread; its progress and result go through the events queue."""
         video_dir = os.path.dirname(input_file) or "."
         error_output = []
         
         try:
+            # ffmpeg writes UTF-8 (file names): the locale encoding (cp1252 on Windows) could fail on it
             proc = subprocess.Popen(
                 ffmpeg_cmd,
                 cwd=video_dir,
-                stdout=subprocess.PIPE,
+                stdout=subprocess.DEVNULL,
                 stderr=subprocess.PIPE,
-                universal_newlines=True
+                encoding="utf-8",
+                errors="replace"
             )
             
             start_time = time.time()
             
-            while True:
-                line = proc.stderr.readline()
-                if not line:
-                    if proc.poll() is not None:
-                        break
-                    continue
-                
+            for line in proc.stderr:  # progress lines end with \r, split like \n
                 # Capture error messages
                 if any(err in line.lower() for err in ["error", "failed", "invalid"]):
                     error_output.append(line.strip())
@@ -501,55 +500,59 @@ def show_progress_window(input_file: str, output_file: str, ffmpeg_cmd: list, du
                             mins, secs = divmod(int(remaining), 60)
                         else:
                             mins, secs = None, None
-                        
-                        # Update GUI
-                        def update_progress(_=None):
-                            progress_var.set(percent)
-                            percent_label.config(text=f"{percent}%")
-
-                        progress_root.after(0, update_progress, None)
-                        if mins is not None:
-                            progress_root.after(0, lambda m=mins, s=secs: time_label.config(
-                                text=f"Estimated time left: {m:02d}:{s:02d}"
-                            ))
+                        events.put(("progress", percent, mins, secs))
             
             proc.wait()
             
-            # Final update
-            progress_root.after(0, lambda: progress_var.set(100))
-            progress_root.after(0, lambda: percent_label.config(text="100%"))
-            progress_root.after(0, lambda: time_label.config(text="Completed!"))
-            
             if proc.returncode == 0:
                 print(Fore.GREEN + "✅ Processing completed successfully!" + Style.RESET_ALL)
-                progress_root.after(100, lambda: messagebox.showinfo(
-                    "✅ Success",
-                    f"Audio tracks processed successfully!\n\nOutput: {os.path.basename(output_file)}"
-                ))
+                events.put(("done", True, f"Audio tracks processed successfully!\n\nOutput: {os.path.basename(output_file)}"))
             else:
                 error_msg = "\n".join(error_output[-5:]) if error_output else "Unknown error (check console for details)"
                 print(Fore.RED + f"❌ Processing failed with code {proc.returncode}" + Style.RESET_ALL)
                 print(Fore.RED + f"Error: {error_msg}" + Style.RESET_ALL)
-                progress_root.after(100, lambda: messagebox.showerror(
-                    "❌ Error",
-                    f"Failed to process audio tracks.\n\nError: {error_msg}\n\nCheck console for full details."
-                ))
+                events.put(("done", False, f"Failed to process audio tracks.\n\nError: {error_msg}\n\nCheck console for full details."))
                 
         except FileNotFoundError:
             error_msg = "FFmpeg not found. Please ensure FFmpeg is installed and in your PATH."
             print(Fore.RED + "❌ " + error_msg + Style.RESET_ALL)
-            progress_root.after(0, lambda: messagebox.showerror("❌ Error", error_msg))
+            events.put(("done", False, error_msg))
             
         except Exception as e:
-            error_msg = str(e)
-            print(Fore.RED + f"❌ Exception: {error_msg}" + Style.RESET_ALL)
-            progress_root.after(0, lambda: messagebox.showerror("❌ Error", f"An unexpected error occurred:\n{error_msg}"))
-        
-        progress_root.after(100, progress_root.destroy)
+            print(Fore.RED + f"❌ Exception: {e}" + Style.RESET_ALL)
+            events.put(("done", False, f"An unexpected error occurred:\n{e}"))
+    
+    def poll():
+        """Apply the worker's events in the Tk thread."""
+        try:
+            while True:
+                event = events.get_nowait()
+                if event[0] == "progress":
+                    _, percent, mins, secs = event
+                    progress_var.set(percent)
+                    percent_label.config(text=f"{percent}%")
+                    if mins is not None:
+                        time_label.config(text=f"Estimated time left: {mins:02d}:{secs:02d}")
+                else:
+                    _, ok, message = event
+                    if ok:
+                        progress_var.set(100)
+                        percent_label.config(text="100%")
+                        time_label.config(text="Completed!")
+                        messagebox.showinfo("✅ Success", message, parent=progress_root)
+                    else:
+                        messagebox.showerror("❌ Error", message, parent=progress_root)
+                    # Closed only once the message is acknowledged
+                    progress_root.destroy()
+                    return
+        except queue.Empty:
+            pass
+        progress_root.after(200, poll)
     
     # Start processing in background thread
     thread = threading.Thread(target=run_ffmpeg, daemon=True)
     thread.start()
+    poll()
     
     progress_root.mainloop()
 

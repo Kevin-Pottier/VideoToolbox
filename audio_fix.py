@@ -170,11 +170,13 @@ def run_audio_fix(file_path: str,
 
     def run_ffmpeg_and_report() -> None:
         """Internal helper to execute ffmpeg and report progress."""
+        # ffmpeg writes UTF-8 (file names): the locale encoding (cp1252 on Windows) could fail on it
         proc = subprocess.Popen(
             ffmpeg_cmd,
-            stdout=subprocess.PIPE,
+            stdout=subprocess.DEVNULL,
             stderr=subprocess.PIPE,
-            universal_newlines=True
+            encoding="utf-8",
+            errors="replace"
         )
         bar_len = 40
         start_time = None
