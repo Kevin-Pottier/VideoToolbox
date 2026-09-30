@@ -27,6 +27,9 @@ __pycache__/
 
 weights/
 
+# External tools downloaded by scripts/fetch_deps.py (Real-ESRGAN binary and models)
+Tool/
+
 !.gitignore
 !README.Md
 !requirements.txt
