@@ -1,8 +1,24 @@
+import functools
 import os
+import subprocess
 
 # Tried in this order: UTF-8 (with or without BOM), then Windows-1252, very common for
 # French .srt files. Latin-1 never fails and is the last resort.
 SUBTITLE_ENCODINGS = ("utf-8-sig", "cp1252", "latin-1")
+
+
+@functools.lru_cache(maxsize=None)
+def fps_mode_option():
+    """
+    The option that sets how ffmpeg handles frame timestamps: '-fps_mode' since FFmpeg 5.1,
+    '-vsync' (its deprecated predecessor) on older versions.
+    """
+    try:
+        help_text = subprocess.run(["ffmpeg", "-hide_banner", "-h", "full"], capture_output=True,
+                                   encoding="utf-8", errors="replace").stdout
+    except OSError:
+        return "-fps_mode"
+    return "-fps_mode" if "-fps_mode" in help_text else "-vsync"
 
 
 def read_subtitle_text(path):

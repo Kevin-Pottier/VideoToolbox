@@ -47,7 +47,7 @@ Modern, user-friendly Python GUI for compressing or upscaling one or multiple vi
    python main.py
    ```
 4. Choose a mode:
-   - **Video Compression**: Select one or more videos, configure subtitles, output format, and size. Batch mode shows a scrollable window with per-file progress and ETA.
+   - **Video Compression**: Select one or more videos, configure subtitles, output format, and size. The video is encoded in two passes (an analysis pass, then the real encode) so that the file ends up just under the requested size. Batch mode shows a scrollable window with per-file progress and ETA.
    - **Video Upscaling (Real-ESRGAN)**: Select one or more videos to upscale and choose the target resolution (720p, 1080p, 4K). Frames are upscaled x4 by Real-ESRGAN then resized to the target height, keeping the aspect ratio, frame rate and audio. A progress window shows each step with its ETA (closing it cancels). Output is saved in the selected folder. ⚠️ The temporary frames need a lot of disk space (hundreds of GB for a full movie): the app estimates it before starting.
    - **Subtitle Translation**: Translate one or more `.srt` files (UTF-8 or Windows-1252) between languages. The translation is fast (multi-threaded), the GUI remains responsive, and a progress bar shows real-time status. When finished, a message box confirms completion (and reports the lines that could not be translated) and the window closes automatically.
    - **Audio fix for stereo**: Down-mix every audio track to stereo AAC. All tracks, subtitles and attachments are kept; French audio tracks are moved first and the first one becomes the default track (detected from the language tag, or from titles such as `VFF`/`VFQ`).
@@ -118,6 +118,8 @@ You can create a standalone `.exe` for easy sharing and use on Windows:
 - Compression and "Add subtitles": the subtitle file can be in any folder, with any name and encoding; "Add subtitles" keeps the existing subtitle tracks.
 - Audio Tracks Management: MP4 output works with SRT/ASS/PGS subtitles in the source.
 - Audio fix: every audio track is kept (only one was), French tracks first and default.
+- Compression in two passes: the output size now matches the target (98% of it with the 2% margin, a single pass could exceed it by several %); the passes keep the source timestamps so that they encode exactly the same frames (otherwise x264 failed or hung on MKV sources), a stuck ffmpeg is killed after 5 minutes without output, and a failed encode leaves no broken file.
+- ffprobe is called once per file, its errors are reported and its output is read as UTF-8 (some accented file names or titles crashed on Windows).
 
 ### July 2025
 - Subtitle translation workflow now fully implemented:

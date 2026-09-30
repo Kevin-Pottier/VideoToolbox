@@ -107,6 +107,32 @@ def test_compression_with_soft_subtitles_in_mkv(movie_mkv, awkward_subtitle):
     assert "Léa : « ça va » €" in subtitle_text(out, 0)
 
 
+def test_two_pass_compression_of_an_mkv_to_mp4_hits_the_target_size(tmp_path, monkeypatch):
+    # AAC in MKV starts before 0: in MP4 the second pass would duplicate a frame without passthrough timestamps
+    import compression
+    monkeypatch.setattr(compression, "STALL_TIMEOUT", 60)  # fail fast instead of hanging if x264 gets stuck
+    src = tmp_path / "noisy.mkv"
+    run_ffmpeg("-f", "lavfi", "-i", "testsrc2=size=320x180:rate=25:duration=6,noise=alls=30:allf=t", *lavfi_audio(duration=6),
+               "-c:v", "libx264", "-crf", "10", "-c:a", "aac", str(src))
+    target_gb = 0.00085  # about 1000 kbps of video
+
+    compression.run_compression(str(src), "none", None, "mp4", target_gb, gui_progress=noop)
+
+    out = tmp_path / "noisy_compressed.mp4"
+    assert count_frames(out) == count_frames(src)  # a complete video, not the leftover of a failed pass
+    assert 0.85 < os.path.getsize(out) / (target_gb * 1024 ** 3) <= 1.0
+
+
+def test_failed_compression_leaves_no_output(movie_mkv, monkeypatch):
+    import compression
+    monkeypatch.setattr(compression, "build_two_pass_commands",
+                        lambda *args, **kwargs: [(["ffmpeg", "-v", "error", "-i", "missing input.mkv", "out.mp4"], 1.0)])
+    output = movie_mkv.replace(".mkv", "_compressed.mp4")
+    open(output, "wb").close()  # as if ffmpeg had started writing it
+    compression.run_compression(movie_mkv, "none", None, "mp4", 0.01, gui_progress=noop)
+    assert not os.path.exists(output)
+
+
 def test_compression_aborts_when_the_target_size_is_too_small(movie_mkv):
     from compression import run_compression
     run_compression(movie_mkv, "none", None, "mp4", 0.00001, gui_progress=noop)

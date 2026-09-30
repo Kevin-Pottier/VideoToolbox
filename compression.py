@@ -1,12 +1,16 @@
 
+import collections
 import os
+import queue
+import re
 import shutil
+import sys
 import tempfile
-from tkinter.ttk import Frame
-from tkinter.ttk import Label
+import threading
+import time
 from colorama import Fore, Style
 from audio_tracks import ffprobe_streams
-from utils import prepare_subtitle_file
+from utils import fps_mode_option, prepare_subtitle_file
 import subprocess
 # Import reusable GUI helpers for modern, DRY window/dialog creation
 from gui_helpers import apply_modern_theme, create_styled_frame, create_styled_label
@@ -14,6 +18,8 @@ from gui_helpers import apply_modern_theme, create_styled_frame, create_styled_l
 AUDIO_BITRATE = 192000  # bps per audio track: used in the ffmpeg command and in the size budget
 SIZE_MARGIN = 0.02  # share of the target size kept for the container overhead and the encoder deviation
 MIN_VIDEO_BITRATE_KBPS = 100
+FIRST_PASS_SHARE = 0.35  # the analysis pass is faster (x264 uses a fast first pass): share of the progress bar
+STALL_TIMEOUT = 300  # seconds without any ffmpeg output after which ffmpeg is considered stuck and killed
 
 def compute_video_bitrate_kbps(max_size_gb, duration, n_audio_tracks):
     """
@@ -65,197 +71,178 @@ def run_compression(file_path, sub_option, sub_file, ext, max_size_gb, gui_progr
 
     output_file = os.path.splitext(file_path)[0] + f"_compressed.{ext}"
 
-    # Build ffmpeg command
     video_name = os.path.basename(file_path)
     input_path = os.path.abspath(file_path)
     output_path = os.path.abspath(output_file)
-    # The subtitle file is copied as UTF-8 under a plain name into a temporary folder, used as
-    # ffmpeg working directory: any location, file name or encoding then works
-    work_dir = None
-    sub_path = None
-    if sub_option in ("soft", "hard") and sub_file:
-        work_dir = tempfile.mkdtemp(prefix="videotoolbox_")
-        try:
-            sub_path = prepare_subtitle_file(sub_file, work_dir)
-        except OSError as e:
-            shutil.rmtree(work_dir, ignore_errors=True)
-            print(Fore.RED + f"Cannot read the subtitle file {sub_file}: {e}. Aborting." + Style.RESET_ALL)
-            return
+    # Temporary folder used as ffmpeg working directory: it holds the statistics of the first pass
+    # and the subtitle file, copied as UTF-8 under a plain name (any location, name or encoding works)
+    work_dir = tempfile.mkdtemp(prefix="videotoolbox_")
+    try:
+        sub_path = prepare_subtitle_file(sub_file, work_dir) if sub_option in ("soft", "hard") and sub_file else None
+    except OSError as e:
+        shutil.rmtree(work_dir, ignore_errors=True)
+        print(Fore.RED + f"Cannot read the subtitle file {sub_file}: {e}. Aborting." + Style.RESET_ALL)
+        return
+    try:
+        passes = build_two_pass_commands(input_path, output_path, ext, video_bitrate_kbps, sub_option, sub_path, work_dir,
+                                         fps_mode_option())
+        print(Fore.YELLOW + f"\nRunning ffmpeg (2 passes) with subtitles option: {sub_option}\n" + Style.RESET_ALL)
+        for step, (cmd, _) in enumerate(passes, 1):
+            print(f"\tPass {step}:", " ".join(cmd))
+        print()
+        if gui_progress is None:
+            ok = _encode_with_progress_window(passes, duration, work_dir, video_name, output_file)
+        else:
+            def report(fraction, remaining):
+                mins, secs = divmod(int(remaining), 60) if remaining is not None else (None, None)
+                gui_progress(int(fraction * 100), mins, secs)
+            ok = _encode(passes, duration, work_dir, report)
+            if ok:
+                print(Fore.GREEN + f"\n✅ Compression finished. Output: {output_file}" + Style.RESET_ALL)
+        if not ok and os.path.exists(output_path):
+            os.remove(output_path)  # a failed encode leaves an unreadable file that looks like a result
+    finally:
+        shutil.rmtree(work_dir, ignore_errors=True)
+
+
+def build_two_pass_commands(input_path, output_path, ext, video_bitrate_kbps, sub_option, sub_path, work_dir,
+                            fps_mode="-fps_mode"):
+    """
+    ffmpeg commands of a two-pass encode: the first pass only analyses the video, the second one
+    uses these statistics to distribute the bits and hit the target size (a single pass can overshoot it).
+    Both passes must encode exactly the same frames: the timestamps are passed through, otherwise
+    the MP4 output of the second pass can duplicate a frame that the first pass did not analyse
+    (x264 then fails with "Incomplete MB-tree stats file" or even hangs).
+    fps_mode is the option name given by utils.fps_mode_option().
+    Returns:
+        list: (command, share of the total work) for each pass.
+    """
+    video_args = []
+    if sub_option == "hard" and sub_path:
+        # Plain relative name, resolved in the working directory: no filter escaping needed
+        video_args += ["-vf", f"subtitles={os.path.basename(sub_path)}"]
+    video_args += [fps_mode, "passthrough",
+                   "-c:v", "libx264", "-b:v", f"{video_bitrate_kbps}k", "-preset", "medium",
+                   "-passlogfile", os.path.join(work_dir, "ffmpeg2pass")]
     if sub_option == "soft" and sub_path:
-        ffmpeg_cmd = [
-            "ffmpeg", "-i", input_path,
-            "-i", sub_path,
-            # mov_text is the only text subtitle codec of MP4, MKV takes SRT/ASS as they are
-            "-c:s", "mov_text" if ext == "mp4" else "copy",
-            "-map", "0:v", "-map", "0:a?", "-map", "1:s",
-            "-c:v", "libx264", "-b:v", f"{video_bitrate_kbps}k",
-            "-preset", "medium",
-            "-c:a", "aac", "-ac", "2", "-ar", "48000", "-b:a", f"{AUDIO_BITRATE // 1000}k",
-            "-movflags", "+faststart",
-            output_path, "-y"
-        ]
+        inputs = ["-i", input_path, "-i", sub_path]
+        maps = ["-map", "0:v", "-map", "0:a?", "-map", "1:s"]
+        video_maps = ["-map", "0:v"]  # both passes must encode the same video streams
+        # mov_text is the only text subtitle codec of MP4, MKV takes SRT/ASS as they are
+        subtitle_args = ["-c:s", "mov_text" if ext == "mp4" else "copy"]
     else:
-        ffmpeg_cmd = [
-            "ffmpeg", "-i", input_path,
-            "-c:v", "libx264", "-b:v", f"{video_bitrate_kbps}k",
-            "-preset", "medium",
-            "-c:a", "aac", "-ac", "2", "-ar", "48000", "-b:a", f"{AUDIO_BITRATE // 1000}k",
-            "-movflags", "+faststart"
-        ]
-        if sub_option == "hard" and sub_path:
-            # Plain relative name, resolved in the working directory: no filter escaping needed
-            ffmpeg_cmd += ["-vf", f"subtitles={os.path.basename(sub_path)}"]
-        ffmpeg_cmd += [output_path, "-y"]
+        inputs, maps, video_maps, subtitle_args = ["-i", input_path], [], [], []
+    audio_args = ["-c:a", "aac", "-ac", "2", "-ar", "48000", "-b:a", f"{AUDIO_BITRATE // 1000}k"]
+    pass1 = ["ffmpeg", "-y", "-i", input_path, *video_maps, *video_args, "-pass", "1", "-an", "-sn", "-f", "null", "-"]
+    pass2 = ["ffmpeg", "-y", *inputs, *maps, *video_args, "-pass", "2", *audio_args, *subtitle_args,
+             "-movflags", "+faststart", output_path]
+    return [(pass1, FIRST_PASS_SHARE), (pass2, 1 - FIRST_PASS_SHARE)]
 
-    print(Fore.YELLOW + f"\nRunning ffmpeg with subtitles option: {sub_option}\n\n" + Style.RESET_ALL)
-    print("\tCommand:", " ".join(ffmpeg_cmd))
-    print()
 
-    # GUI progress bar setup (only if not in batch mode)
-    import threading
+def _encode(passes, duration, work_dir, report):
+    """
+    Run the passes one after the other; report(fraction of the whole job, seconds left or None)
+    is called on each ffmpeg progress line. Returns True on success.
+    """
+    start_time = time.time()
+    done = 0.0
+    for step, (cmd, share) in enumerate(passes, 1):
+        # ffmpeg writes UTF-8 (file names): the locale encoding (cp1252 on Windows) could fail on it
+        proc = subprocess.Popen(cmd, cwd=work_dir, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+                                encoding="utf-8", errors="replace")
+        last_lines = collections.deque(maxlen=8)  # shown if ffmpeg fails
+        last_output = [time.time()]
+        stalled = threading.Event()
+
+        def watchdog():
+            # A stuck ffmpeg ignores the usual termination request: kill it
+            while proc.poll() is None:
+                if time.time() - last_output[0] > STALL_TIMEOUT:
+                    stalled.set()
+                    proc.kill()
+                    return
+                time.sleep(1)
+        threading.Thread(target=watchdog, daemon=True).start()
+        for line in proc.stderr:  # progress lines end with \r, split like \n
+            last_output[0] = time.time()
+            last_lines.append(line.rstrip())
+            match = re.search(r"time=(\d+):(\d+):(\d+\.\d+)", line)
+            if match:
+                h, m, s = match.groups()
+                fraction = done + share * min(1.0, (int(h) * 3600 + int(m) * 60 + float(s)) / duration)
+                elapsed = time.time() - start_time
+                report(fraction, elapsed / fraction - elapsed if fraction > 0 else None)
+        proc.wait()
+        if proc.returncode != 0:
+            reason = f"ffmpeg stopped responding for {STALL_TIMEOUT} s and was killed" if stalled.is_set() else "\n".join(last_lines)
+            print(Fore.RED + f"\n❌ Compression failed (pass {step}):\n{reason}" + Style.RESET_ALL)
+            return False
+        done += share
+    report(1.0, 0)
+    return True
+
+
+def _encode_with_progress_window(passes, duration, work_dir, video_name, output_file):
+    """Encode in a worker thread while a progress window (and a console bar) shows the progress. Returns True on success."""
     import tkinter as tk
     import tkinter.ttk as ttk
-    if gui_progress is None:
-        # Use Toplevel if a root window exists, else Tk
-        try:
-            root = tk._default_root
-        except AttributeError:
-            root = None
-        if root is not None and root.winfo_exists():
-            progress_win = tk.Toplevel(root)
-        else:
-            progress_win = tk.Tk()
-        progress_win.title("Compression Progress")
-        progress_win.geometry("420x150")
-        progress_win.attributes('-topmost', True)
-        # Apply modern theme and palette using helper
-        style = ttk.Style(progress_win)
-        apply_modern_theme(progress_win, style)
-        frame: Frame = create_styled_frame(progress_win)
-        frame.pack(fill="both", expand=True, padx=10, pady=10)
-        create_styled_label(frame, text=f"Compressing: {video_name}", style='Title.TLabel').pack(pady=(0, 8))
-        progress_var = tk.DoubleVar(master=progress_win)
-        progress_bar = ttk.Progressbar(frame, variable=progress_var, maximum=duration, length=350, style='TProgressbar')
-        progress_bar.pack(pady=6)
-        percent_label: Label = create_styled_label(frame, text="0%", style='TLabel')
-        percent_label.pack()
-        time_label: Label = create_styled_label(frame, text="Estimated time left: --:--", style='TLabel', font=("Segoe UI", 10, "italic"))
-        time_label.pack()
+    events = queue.Queue()  # the worker thread never touches Tk: it only fills this queue
+    result = {"ok": False}
 
-        def update_gui(cur_time, percent, mins, secs) -> None:
-            if not progress_win.winfo_exists():
-                return
-            try:
-                progress_var.set(cur_time)
-                percent_label.config(text=f"{percent}%")
-                if mins is not None and secs is not None:
-                    time_label.config(text=f"Estimated time left: {mins:02d}:{secs:02d}")
-                else:
-                    time_label.config(text="Estimated time left: --:--")
-                progress_win.update_idletasks()
-            except Exception:
-                pass
+    root = tk._default_root
+    progress_win = tk.Toplevel(root) if root is not None and root.winfo_exists() else tk.Tk()
+    progress_win.title("Compression Progress")
+    progress_win.geometry("420x150")
+    progress_win.attributes('-topmost', True)
+    apply_modern_theme(progress_win)
+    frame = create_styled_frame(progress_win)
+    frame.pack(fill="both", expand=True, padx=10, pady=10)
+    create_styled_label(frame, text=f"Compressing: {video_name}", style='Title.TLabel').pack(pady=(0, 8))
+    progress_var = tk.DoubleVar(master=progress_win)
+    ttk.Progressbar(frame, variable=progress_var, maximum=100, length=350, style='TProgressbar').pack(pady=6)
+    percent_label = create_styled_label(frame, text="0%", style='TLabel')
+    percent_label.pack()
+    time_label = create_styled_label(frame, text="Estimated time left: --:--", style='TLabel', font=("Segoe UI", 10, "italic"))
+    time_label.pack()
 
-        def finalize_gui() -> None:
-            if not progress_win.winfo_exists():
-                return
-            try:
-                progress_var.set(duration)
-                percent_label.config(text="100%")
-                time_label.config(text="Estimated time left: 00:00")
-                progress_win.update_idletasks()
-            except Exception:
-                pass
-            # Schedule window close after 500ms if still open
-            def safe_destroy() -> None:
-                try:
-                    if progress_win.winfo_exists():
-                        progress_win.destroy()
-                except Exception:
-                    pass
-            try:
-                if progress_win.winfo_exists():
-                    progress_win.after(500, safe_destroy)
-            except Exception:
-                pass
-
-    import sys
-    def run_ffmpeg() -> None:
-        """
-        Run FFmpeg as a subprocess, parse its output for progress, and update both GUI and CLI progress bars.
-        """
-        import time
-        proc: subprocess.Popen[str] = subprocess.Popen(ffmpeg_cmd, cwd=work_dir, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
-        start_time: float = time.time()
+    def show(fraction, remaining):
+        percent = int(fraction * 100)
+        eta = "--:--" if remaining is None else "{:02d}:{:02d}".format(*divmod(int(remaining), 60))
+        progress_var.set(percent)
+        percent_label.config(text=f"{percent}%")
+        time_label.config(text=f"Estimated time left: {eta}")
         bar_len = 40
-        while True:
-            line: str = proc.stderr.readline()
-            if not line:
-                if proc.poll() is not None:
-                    break
-                continue
-            if "time=" in line:
-                import re
-                from typing import Optional
-                match: Optional[re.Match] = re.search(r'time=(\d+):(\d+):(\d+\.\d+)', line)
-                if match:
-                    h, m, s = match.groups()
-                    cur_time: float = int(h) * 3600 + int(m) * 60 + float(s)
-                    percent: int = min(100, int(cur_time / duration * 100))
-                    elapsed: float = time.time() - start_time
-                    if cur_time > 0 and percent < 100:
-                        est_total: float = elapsed / (cur_time / duration)
-                        remaining: float = est_total - elapsed
-                        mins, secs = divmod(int(remaining), 60)
-                    else:
-                        mins, secs = None, None
-                    if gui_progress:
-                        gui_progress(percent, mins, secs)
-                    else:
-                        progress_win.after(0, update_gui, cur_time, percent, mins, secs)
-                        # CMD progress bar
-                        filled_len = int(round(bar_len * cur_time / float(duration)))
-                        bar: str = '=' * filled_len + '-' * (bar_len - filled_len)
-                        sys.stdout.write(f'\rCompressing: [{bar}] {percent}% | ETA: {mins if mins is not None else 0:02d}:{secs if secs is not None else 0:02d}')
-                        sys.stdout.flush()
-        proc.wait()
-        # Always set to 100% at the end
-        if gui_progress:
-            try:
-                gui_progress(100, 0, 0)
-            except Exception:
-                pass
-        else:
-            progress_win.after(0, finalize_gui)
-            # Force CMD progress bar to 100%
-            bar_len = 40
-            bar: str = '=' * bar_len
-            sys.stdout.write(f'\rCompressing: [{bar}] 100% | ETA: 00:00\n')
-            sys.stdout.flush()
-        if proc.returncode == 0:
-            print(Fore.GREEN + f"\n✅ Compression finished. Output: {output_file}" + Style.RESET_ALL)
-        else:
-            print(Fore.RED + "\n❌ Compression failed." + Style.RESET_ALL)
+        filled = int(round(bar_len * fraction))
+        sys.stdout.write(f"\rCompressing: [{'=' * filled}{'-' * (bar_len - filled)}] {percent}% | ETA: {eta}")
+        sys.stdout.flush()
 
-    try:
-        if gui_progress is None:
-            # Use a flag to signal when done
-            done_flag = threading.Event()
-            def run_ffmpeg_and_finalize() -> None:
-                run_ffmpeg()
-                # Finalize GUI from main thread, only if window still exists
-                try:
-                    if progress_win.winfo_exists():
-                        progress_win.after(0, finalize_gui)
-                except Exception:
-                    pass
-                done_flag.set()
-            thread = threading.Thread(target=run_ffmpeg_and_finalize)
-            thread.start()
-            progress_win.mainloop()
-            thread.join()  # Wait for compression to finish before returning
-        else:
-            run_ffmpeg()
-    finally:
-        if work_dir:
-            shutil.rmtree(work_dir, ignore_errors=True)
+    def worker():
+        ok = False
+        try:
+            ok = _encode(passes, duration, work_dir, lambda *progress: events.put(("progress", *progress)))
+        finally:
+            events.put(("done", ok))
+
+    def poll():
+        try:
+            while True:
+                event = events.get_nowait()
+                if event[0] == "progress":
+                    show(*event[1:])
+                else:
+                    print()
+                    result["ok"] = event[1]
+                    if event[1]:
+                        print(Fore.GREEN + f"\n✅ Compression finished. Output: {output_file}" + Style.RESET_ALL)
+                    progress_win.after(500, progress_win.destroy)
+                    return
+        except queue.Empty:
+            pass
+        progress_win.after(200, poll)
+
+    thread = threading.Thread(target=worker, daemon=True)
+    thread.start()
+    poll()
+    progress_win.wait_window()
+    thread.join()
+    return result["ok"]
