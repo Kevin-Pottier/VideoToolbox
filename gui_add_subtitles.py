@@ -2,8 +2,10 @@ import tkinter as tk
 from tkinter import filedialog, messagebox
 from colorama import Fore, Style
 import os
+import shutil
 import subprocess
 import re
+import tempfile
 import threading
 import queue
 # Import reusable GUI helpers for modern, DRY window/dialog creation
@@ -19,15 +21,18 @@ def add_subtitles_to_video(video_path, sub_option, sub_file, gui_progress=None):
         sub_file (str): Path to the subtitle file.
         gui_progress (callable): Optional callback for progress updates (percent, mins, secs).
     """
-    from utils import ffprobe
+    from utils import ffprobe, prepare_subtitle_file
     
-    video_dir = os.path.dirname(video_path)
     video_name = os.path.basename(video_path)
     video_ext = os.path.splitext(video_path)[1]
+    if sub_option == "soft" and video_ext.lower() not in (".mp4", ".mov", ".mkv"):
+        # AVI, FLV, WMV... cannot store text subtitles
+        video_ext = ".mkv"
     
     # Determine output filename
     output_file = os.path.splitext(video_path)[0] + f"_with_subtitles{video_ext}"
-    output_name = os.path.basename(output_file)
+    input_path = os.path.abspath(video_path)
+    output_path = os.path.abspath(output_file)
     
     # Get video duration for progress
     try:
@@ -40,39 +45,61 @@ def add_subtitles_to_video(video_path, sub_option, sub_file, gui_progress=None):
     except Exception:
         duration = 0
     
+    # The subtitle file is copied as UTF-8 under a plain name into a temporary folder, used as
+    # ffmpeg working directory: any location, file name or encoding then works
+    work_dir = tempfile.mkdtemp(prefix="videotoolbox_")
+    try:
+        sub_path = prepare_subtitle_file(sub_file, work_dir)
+    except OSError as e:
+        shutil.rmtree(work_dir, ignore_errors=True)
+        print(Fore.RED + f"\n❌ Cannot read the subtitle file {sub_file}: {e}" + Style.RESET_ALL)
+        return None
+    
     # Build FFmpeg command based on subtitle option
     if sub_option == "soft":
-        # Softcode: attach subtitle file to video
-        sub_filename = os.path.basename(sub_file)
+        # Softcode: add the subtitle track, keeping every track of the source
+        # (existing subtitles, and the fonts attached to MKV files)
         ffmpeg_cmd = [
-            "ffmpeg", "-i", video_name,
-            "-i", sub_filename,
-            "-c:s", "mov_text" if video_ext.lower() == ".mp4" else "srt",
-            "-map", "0:v", "-map", "0:a", "-map", "1:s",
-            "-c:v", "copy",
-            "-c:a", "copy",
-            "-movflags", "+faststart",
-            output_name, "-y"
+            "ffmpeg", "-i", input_path,
+            "-i", sub_path,
+            "-map", "0:v", "-map", "0:a?", "-map", "0:s?", "-map", "0:t?", "-map", "1:s",
+            "-c", "copy",
         ]
+        if video_ext.lower() in (".mp4", ".mov"):
+            # mov_text is the only text subtitle codec of MP4/MOV, MKV takes SRT/ASS as they are
+            ffmpeg_cmd += ["-c:s", "mov_text", "-movflags", "+faststart"]
+        ffmpeg_cmd += [output_path, "-y"]
     else:  # hard
-        # Hardcode: burn subtitles into video
-        sub_filename = os.path.basename(sub_file)
-        # Escape backslashes for FFmpeg filter
-        sub_filter = sub_filename.replace("\\", "/")
+        # Hardcode: burn subtitles into video (plain relative name: no filter escaping needed)
         ffmpeg_cmd = [
-            "ffmpeg", "-i", video_name,
-            "-vf", f"subtitles='{sub_filter}'",
+            "ffmpeg", "-i", input_path,
+            "-vf", f"subtitles={os.path.basename(sub_path)}",
             "-c:v", "libx264", "-preset", "fast",
             "-c:a", "copy",
-            output_name, "-y"
+            output_path, "-y"
         ]
     
     print(Fore.YELLOW + f"\nAdding subtitles ({sub_option}) to: {video_name}\n" + Style.RESET_ALL)
     print("\tCommand:", " ".join(ffmpeg_cmd))
     
     # Run FFmpeg and capture progress
+    try:
+        return_code = _run_with_progress(ffmpeg_cmd, work_dir, duration, gui_progress)
+    finally:
+        shutil.rmtree(work_dir, ignore_errors=True)
+    
+    if return_code == 0:
+        print(Fore.GREEN + f"\n✅ Subtitles added successfully. Output: {output_file}" + Style.RESET_ALL)
+        return output_file
+    else:
+        print(Fore.RED + f"\n❌ Failed to add subtitles." + Style.RESET_ALL)
+        return None
+
+
+def _run_with_progress(ffmpeg_cmd, cwd, duration, gui_progress):
+    """Run ffmpeg, forward its progress to gui_progress(percent, mins, secs), return the exit code."""
     import time
-    proc = subprocess.Popen(ffmpeg_cmd, cwd=video_dir, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
+    proc = subprocess.Popen(ffmpeg_cmd, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
     start_time = time.time()
     last_time = 0
     
@@ -111,13 +138,7 @@ def add_subtitles_to_video(video_path, sub_option, sub_file, gui_progress=None):
     # Final progress update
     if gui_progress:
         gui_progress(100, 0, 0)
-    
-    if proc.returncode == 0:
-        print(Fore.GREEN + f"\n✅ Subtitles added successfully. Output: {output_file}" + Style.RESET_ALL)
-        return output_file
-    else:
-        print(Fore.RED + f"\n❌ Failed to add subtitles." + Style.RESET_ALL)
-        return None
+    return proc.returncode
 
 
 def run_add_subtitles_gui():

@@ -1,9 +1,11 @@
 
 import os
+import shutil
+import tempfile
 from tkinter.ttk import Frame
 from tkinter.ttk import Label
 from colorama import Fore, Style
-from utils import ffprobe
+from utils import ffprobe, prepare_subtitle_file
 import subprocess
 # Import reusable GUI helpers for modern, DRY window/dialog creation
 from main import apply_modern_theme, create_styled_frame, create_styled_label
@@ -77,15 +79,25 @@ def run_compression(file_path, sub_option, sub_file, ext, max_size_gb, gui_progr
     output_file = os.path.splitext(file_path)[0] + f"_compressed.{ext}"
 
     # Build ffmpeg command
-    video_dir = os.path.dirname(file_path)
     video_name = os.path.basename(file_path)
-    output_name = os.path.basename(output_file)
-    # For subtitles, use only the filename and set cwd to video_dir
-    if sub_option == "soft":
-        sub_filename = os.path.basename(sub_file) if sub_file else None
+    input_path = os.path.abspath(file_path)
+    output_path = os.path.abspath(output_file)
+    # The subtitle file is copied as UTF-8 under a plain name into a temporary folder, used as
+    # ffmpeg working directory: any location, file name or encoding then works
+    work_dir = None
+    sub_path = None
+    if sub_option in ("soft", "hard") and sub_file:
+        work_dir = tempfile.mkdtemp(prefix="videotoolbox_")
+        try:
+            sub_path = prepare_subtitle_file(sub_file, work_dir)
+        except OSError as e:
+            shutil.rmtree(work_dir, ignore_errors=True)
+            print(Fore.RED + f"Cannot read the subtitle file {sub_file}: {e}. Aborting." + Style.RESET_ALL)
+            return
+    if sub_option == "soft" and sub_path:
         ffmpeg_cmd = [
-            "ffmpeg", "-i", video_name,
-            "-i", sub_filename,
+            "ffmpeg", "-i", input_path,
+            "-i", sub_path,
             # mov_text is the only text subtitle codec of MP4, MKV takes SRT/ASS as they are
             "-c:s", "mov_text" if ext == "mp4" else "copy",
             "-map", "0:v", "-map", "0:a?", "-map", "1:s",
@@ -93,22 +105,20 @@ def run_compression(file_path, sub_option, sub_file, ext, max_size_gb, gui_progr
             "-preset", "medium",
             "-c:a", "aac", "-ac", "2", "-ar", "48000", "-b:a", f"{AUDIO_BITRATE // 1000}k",
             "-movflags", "+faststart",
-            output_name, "-y"
+            output_path, "-y"
         ]
     else:
         ffmpeg_cmd = [
-            "ffmpeg", "-i", video_name,
+            "ffmpeg", "-i", input_path,
             "-c:v", "libx264", "-b:v", f"{video_bitrate_kbps}k",
             "-preset", "medium",
             "-c:a", "aac", "-ac", "2", "-ar", "48000", "-b:a", f"{AUDIO_BITRATE // 1000}k",
             "-movflags", "+faststart"
         ]
-        if sub_option == "hard" and sub_file:
-            sub_filename = os.path.basename(sub_file)
-            # Always use forward slashes for ffmpeg filter
-            sub_filename_ffmpeg = sub_filename.replace("\\", "/")
-            ffmpeg_cmd += ["-vf", f"subtitles={sub_filename_ffmpeg}"]
-        ffmpeg_cmd += [output_name, "-y"]
+        if sub_option == "hard" and sub_path:
+            # Plain relative name, resolved in the working directory: no filter escaping needed
+            ffmpeg_cmd += ["-vf", f"subtitles={os.path.basename(sub_path)}"]
+        ffmpeg_cmd += [output_path, "-y"]
 
     print(Fore.YELLOW + f"\nRunning ffmpeg with subtitles option: {sub_option}\n\n" + Style.RESET_ALL)
     print("\tCommand:", " ".join(ffmpeg_cmd))
@@ -188,7 +198,7 @@ def run_compression(file_path, sub_option, sub_file, ext, max_size_gb, gui_progr
         Run FFmpeg as a subprocess, parse its output for progress, and update both GUI and CLI progress bars.
         """
         import time
-        proc: subprocess.Popen[str] = subprocess.Popen(ffmpeg_cmd, cwd=video_dir, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
+        proc: subprocess.Popen[str] = subprocess.Popen(ffmpeg_cmd, cwd=work_dir, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
         last_time = 0
         start_time: float = time.time()
         bar_len = 40
@@ -242,21 +252,25 @@ def run_compression(file_path, sub_option, sub_file, ext, max_size_gb, gui_progr
         else:
             print(Fore.RED + f"\n❌ Compression failed." + Style.RESET_ALL)
 
-    if gui_progress is None:
-        # Use a flag to signal when done
-        done_flag = threading.Event()
-        def run_ffmpeg_and_finalize() -> None:
+    try:
+        if gui_progress is None:
+            # Use a flag to signal when done
+            done_flag = threading.Event()
+            def run_ffmpeg_and_finalize() -> None:
+                run_ffmpeg()
+                # Finalize GUI from main thread, only if window still exists
+                try:
+                    if progress_win.winfo_exists():
+                        progress_win.after(0, finalize_gui)
+                except Exception:
+                    pass
+                done_flag.set()
+            thread = threading.Thread(target=run_ffmpeg_and_finalize)
+            thread.start()
+            progress_win.mainloop()
+            thread.join()  # Wait for compression to finish before returning
+        else:
             run_ffmpeg()
-            # Finalize GUI from main thread, only if window still exists
-            try:
-                if progress_win.winfo_exists():
-                    progress_win.after(0, finalize_gui)
-            except Exception:
-                pass
-            done_flag.set()
-        thread = threading.Thread(target=run_ffmpeg_and_finalize)
-        thread.start()
-        progress_win.mainloop()
-        thread.join()  # Wait for compression to finish before returning
-    else:
-        run_ffmpeg()
+    finally:
+        if work_dir:
+            shutil.rmtree(work_dir, ignore_errors=True)
