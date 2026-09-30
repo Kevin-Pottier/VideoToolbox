@@ -2,6 +2,8 @@
 
 # VideoCompress
 
+[![CI](https://github.com/Kevin-Pottier/VideoToolbox/actions/workflows/ci.yml/badge.svg)](https://github.com/Kevin-Pottier/VideoToolbox/actions/workflows/ci.yml)
+
 Modern, user-friendly Python GUI for compressing or upscaling one or multiple video files and translating subtitles, with per-file progress, ETA, advanced batch features, and a fast, responsive, multi-threaded subtitle translation workflow with GUI progress bar. Now includes Real-ESRGAN integration for high-quality video upscaling.
 
 ## Features
@@ -64,6 +66,16 @@ Modern, user-friendly Python GUI for compressing or upscaling one or multiple vi
 - Improved subtitle workflow: select which videos need subtitles before configuring options.
 - Per-file progress bars and ETA in batch mode.
 - Robust error handling and user feedback throughout.
+
+## Development
+
+```bash
+pip install -r requirements-dev.txt
+python -m pytest   # unit tests, plus end-to-end tests with FFmpeg (skipped when FFmpeg is not installed)
+ruff check .       # lint: undefined names, unused imports and variables...
+```
+
+The tests live in `tests/`: the pure functions (bitrate budget, track ordering, ffmpeg commands, subtitle encodings, language codes...) are unit tested, and `test_ffmpeg_integration.py` runs the real ffmpeg on small generated videos (the upscaling test uses a stand-in for Real-ESRGAN). GitHub Actions runs the lint and the tests on Linux (Python 3.9 and 3.13) and Windows (Python 3.13) for every push and pull request.
 
 ## License
 MIT
