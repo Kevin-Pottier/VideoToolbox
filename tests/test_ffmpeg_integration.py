@@ -125,8 +125,9 @@ def test_two_pass_compression_of_an_mkv_to_mp4_hits_the_target_size(tmp_path, mo
 
 def test_failed_compression_leaves_no_output(movie_mkv, monkeypatch):
     import compression
-    monkeypatch.setattr(compression, "build_two_pass_commands",
-                        lambda *args, **kwargs: [(["ffmpeg", "-v", "error", "-i", "missing input.mkv", "out.mp4"], 1.0)])
+    failing = ["ffmpeg", "-v", "error", "-i", "missing input.mkv", "out.mp4"]
+    monkeypatch.setattr(compression, "build_copy_command", lambda *args, **kwargs: failing)
+    monkeypatch.setattr(compression, "build_encode_commands", lambda *args, **kwargs: [(failing, 1.0)])
     output = movie_mkv.replace(".mkv", "_compressed.mp4")
     open(output, "wb").close()  # as if ffmpeg had started writing it
     compression.run_compression(movie_mkv, "none", None, "mp4", 0.01, gui_progress=noop)
@@ -238,3 +239,52 @@ def test_ffprobe_streams_reads_utf8_titles_and_frame_rates(tmp_path):
     assert info.audio_tracks[0].title == "Á la française"
     assert info.video_tracks[0].avg_frame_rate == "24000/1001"
     assert info.duration == pytest.approx(1, abs=0.1)
+
+
+def stream_md5(path, spec):
+    """MD5 of the packets of a stream: identical when the stream was copied, not re-encoded."""
+    out = subprocess.run(["ffmpeg", "-v", "error", "-i", str(path), "-map", spec, "-c", "copy", "-f", "md5", "-"],
+                         capture_output=True, text=True, check=True).stdout
+    return out.strip()
+
+
+@pytest.mark.parametrize("encoder_name, codec", [("libx265", "hevc"), ("libsvtav1", "av1")])
+def test_compression_with_the_other_cpu_encoders(tmp_path, monkeypatch, encoder_name, codec):
+    import compression
+    import encoders
+    if encoder_name not in encoders._built_encoders():
+        pytest.skip(f"{encoder_name} is not in this FFmpeg build")
+    monkeypatch.setattr(compression, "STALL_TIMEOUT", 60)
+    src = tmp_path / "noisy.mkv"
+    run_ffmpeg("-f", "lavfi", "-i", "testsrc2=size=320x180:rate=25:duration=4,noise=alls=30:allf=t", *lavfi_audio(duration=4),
+               "-c:v", "libx264", "-crf", "10", "-c:a", "aac", str(src))
+    target_gb = 0.0006
+
+    compression.run_compression(str(src), "none", None, "mp4", target_gb, gui_progress=noop,
+                                encoder=encoders.BY_NAME[encoder_name])
+
+    out = tmp_path / "noisy_compressed.mp4"
+    assert [s["codec_name"] for s in streams_of_type(out, "video")] == [codec]
+    assert count_frames(out) == count_frames(src)
+    # Two passes hit the size; a single pass (SVT-AV1, GPU) only approaches it, here on a short and very noisy clip
+    tolerance = 1.0 if encoders.BY_NAME[encoder_name].two_pass else 1.1
+    assert os.path.getsize(out) <= target_gb * 1024 ** 3 * tolerance
+
+
+def test_a_file_already_under_the_target_size_is_copied(movie_mkv):
+    import compression
+    compression.run_compression(movie_mkv, "none", None, "mkv", 0.01, gui_progress=noop)
+    out = movie_mkv.replace(".mkv", "_compressed.mkv")
+    assert stream_md5(out, "0:v") == stream_md5(movie_mkv, "0:v")  # not re-encoded
+    assert [s["codec_name"] for s in streams_of_type(out, "subtitle")] == ["subrip"]
+
+
+def test_copy_falls_back_to_encoding_when_the_container_refuses_a_codec(tmp_path):
+    # WMA audio cannot be copied into MP4: the file is encoded instead
+    import compression
+    src = tmp_path / "wma.mkv"
+    run_ffmpeg(*lavfi_video(), *lavfi_audio(), "-map", "0", "-map", "1", "-c:v", "libx264", "-c:a", "wmav2", str(src))
+    compression.run_compression(str(src), "none", None, "mp4", 0.01, gui_progress=noop)
+    out = tmp_path / "wma_compressed.mp4"
+    assert [s["codec_name"] for s in streams_of_type(out, "audio")] == ["aac"]
+    assert count_frames(out) == count_frames(src)

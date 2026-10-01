@@ -3,7 +3,8 @@ from tkinter import filedialog, simpledialog, messagebox
 from colorama import Fore, Style
 import os
 from compression import run_compression
-from gui_helpers import apply_modern_theme, create_styled_frame, create_styled_label, create_styled_button, show_message
+from gui_helpers import (apply_modern_theme, choose_encoder, create_styled_button, create_styled_frame,
+                         create_styled_label, show_message)
 
 def run_video_compression():
     """
@@ -89,6 +90,10 @@ def run_video_compression():
         if ext not in ("mp4", "mkv"):
             print(Fore.RED + "No container selected. Aborting." + Style.RESET_ALL)
             return
+        encoder = choose_encoder()
+        if encoder is None:
+            print(Fore.RED + "No encoder selected. Aborting." + Style.RESET_ALL)
+            return
 
         # Max size
         max_size_gb = None
@@ -113,7 +118,7 @@ def run_video_compression():
             messagebox.showerror("❌ Error", "Unable to determine the subtitle file.")
             return
 
-        run_compression(path, sub_option, sub_file, ext, max_size_gb)
+        run_compression(path, sub_option, sub_file, ext, max_size_gb, encoder=encoder)
         return
 
     # MULTIPLE FILES WORKFLOW (improved subtitle selection)
@@ -209,6 +214,10 @@ def run_video_compression():
     if ext not in ("mp4", "mkv"):
         print(Fore.RED + "No container selected. Aborting." + Style.RESET_ALL)
         return
+    encoder = choose_encoder()
+    if encoder is None:
+        print(Fore.RED + "No encoder selected. Aborting." + Style.RESET_ALL)
+        return
 
     # Step 4: Max size (reuse logic)
     max_size_gb = None
@@ -282,7 +291,7 @@ def run_video_compression():
         if max_size_gb == None:
             messagebox.showerror("❌ Error", "Unable to determine the max size.")
             return
-        run_compression(path, sub_option, sub_file, ext, max_size_gb, gui_progress=gui_progress)
+        run_compression(path, sub_option, sub_file, ext, max_size_gb, gui_progress=gui_progress, encoder=encoder)
         # Ensure bar is set to 100% at the end
         progress_queues[idx].put((100, 0, 0))
 

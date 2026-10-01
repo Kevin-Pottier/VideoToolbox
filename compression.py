@@ -1,5 +1,6 @@
 
 import collections
+import contextlib
 import os
 import queue
 import re
@@ -10,6 +11,7 @@ import threading
 import time
 from colorama import Fore, Style
 from audio_tracks import ffprobe_streams
+import encoders
 from utils import fps_mode_option, prepare_subtitle_file
 import subprocess
 # Import reusable GUI helpers for modern, DRY window/dialog creation
@@ -20,18 +22,20 @@ SIZE_MARGIN = 0.02  # share of the target size kept for the container overhead a
 MIN_VIDEO_BITRATE_KBPS = 100
 FIRST_PASS_SHARE = 0.35  # the analysis pass is faster (x264 uses a fast first pass): share of the progress bar
 STALL_TIMEOUT = 300  # seconds without any ffmpeg output after which ffmpeg is considered stuck and killed
+# Consumer graphics cards limit the number of simultaneous hardware encodes: batch mode waits for a free slot
+_GPU_SESSIONS = threading.BoundedSemaphore(2)
 
-def compute_video_bitrate_kbps(max_size_gb, duration, n_audio_tracks):
+def compute_video_bitrate_kbps(max_size_gb, duration, n_audio_tracks, margin=SIZE_MARGIN):
     """
     Video bitrate (kbps) that makes the output fit in max_size_gb, given the audio
-    tracks encoded at AUDIO_BITRATE and the SIZE_MARGIN. Can be negative if the size is too small.
+    tracks encoded at AUDIO_BITRATE and the margin kept free. Can be negative if the size is too small.
     """
-    target_bits = max_size_gb * 1024 * 1024 * 1024 * 8 * (1 - SIZE_MARGIN)  # in bits
+    target_bits = max_size_gb * 1024 * 1024 * 1024 * 8 * (1 - margin)  # in bits
     audio_bits_total = AUDIO_BITRATE * n_audio_tracks * duration  # in bits
     video_bitrate = (target_bits - audio_bits_total) / duration  # in bits per second
     return int(video_bitrate / 1000)  # in kbps
 
-def run_compression(file_path, sub_option, sub_file, ext, max_size_gb, gui_progress=None) -> None:
+def run_compression(file_path, sub_option, sub_file, ext, max_size_gb, gui_progress=None, encoder=None) -> None:
     """
     Compress a video file using FFmpeg, with optional subtitle handling and GUI/CLI progress bars.
     Args:
@@ -40,7 +44,9 @@ def run_compression(file_path, sub_option, sub_file, ext, max_size_gb, gui_progr
         sub_file (str): Path to the subtitle file (if any).
         ext (str): Output file extension ('mp4' or 'mkv').
         max_size_gb (float): Target maximum file size in GB.
+        encoder (encoders.Encoder): Video encoder, x264 by default.
     """
+    encoder = encoder or encoders.DEFAULT
     # Metadata extraction (a single ffprobe call)
     try:
         media = ffprobe_streams(file_path)
@@ -61,7 +67,7 @@ def run_compression(file_path, sub_option, sub_file, ext, max_size_gb, gui_progr
     print(f"Duration: {duration:.2f} s")
     print(f"Audio: {n_audio_out} track(s) encoded at {AUDIO_BITRATE // 1000} kbps")
 
-    video_bitrate_kbps = compute_video_bitrate_kbps(max_size_gb, duration, n_audio_out)
+    video_bitrate_kbps = compute_video_bitrate_kbps(max_size_gb, duration, n_audio_out, encoders.size_margin(encoder))
 
     print(f"Target Video Bitrate: {video_bitrate_kbps} kbps")
     if video_bitrate_kbps < MIN_VIDEO_BITRATE_KBPS:
@@ -83,33 +89,49 @@ def run_compression(file_path, sub_option, sub_file, ext, max_size_gb, gui_progr
         shutil.rmtree(work_dir, ignore_errors=True)
         print(Fore.RED + f"Cannot read the subtitle file {sub_file}: {e}. Aborting." + Style.RESET_ALL)
         return
-    try:
-        passes = build_two_pass_commands(input_path, output_path, ext, video_bitrate_kbps, sub_option, sub_path, work_dir,
-                                         fps_mode_option())
-        print(Fore.YELLOW + f"\nRunning ffmpeg (2 passes) with subtitles option: {sub_option}\n" + Style.RESET_ALL)
+    def run(passes, slot=contextlib.nullcontext()):
         for step, (cmd, _) in enumerate(passes, 1):
             print(f"\tPass {step}:", " ".join(cmd))
         print()
-        if gui_progress is None:
-            ok = _encode_with_progress_window(passes, duration, work_dir, video_name, output_file)
-        else:
-            def report(fraction, remaining):
-                mins, secs = divmod(int(remaining), 60) if remaining is not None else (None, None)
-                gui_progress(int(fraction * 100), mins, secs)
-            ok = _encode(passes, duration, work_dir, report)
-            if ok:
-                print(Fore.GREEN + f"\n✅ Compression finished. Output: {output_file}" + Style.RESET_ALL)
+        with slot:
+            if gui_progress is None:
+                ok = _encode_with_progress_window(passes, duration, work_dir, video_name, output_file)
+            else:
+                def report(fraction, remaining):
+                    mins, secs = divmod(int(remaining), 60) if remaining is not None else (None, None)
+                    gui_progress(int(fraction * 100), mins, secs)
+                ok = _encode(passes, duration, work_dir, report)
+                if ok:
+                    print(Fore.GREEN + f"\n✅ Compression finished. Output: {output_file}" + Style.RESET_ALL)
         if not ok and os.path.exists(output_path):
             os.remove(output_path)  # a failed encode leaves an unreadable file that looks like a result
+        return ok
+
+    try:
+        # Shortcut: a file already under the target size only needs its streams copied (seconds, no quality
+        # loss, original audio kept). Burned subtitles need a re-encode; if the copy fails (codec the container
+        # cannot store), the file is encoded as usual.
+        if sub_option != "hard" and os.path.getsize(file_path) <= max_size_gb * 1024 ** 3 * (1 - SIZE_MARGIN):
+            print(Fore.YELLOW + "\nThe file is already under the target size: copying the streams without re-encoding\n"
+                  + Style.RESET_ALL)
+            if run([(build_copy_command(input_path, output_path, ext, sub_option, sub_path), 1.0)]):
+                return
+            print(Fore.YELLOW + "Copy impossible in this container, encoding the file instead." + Style.RESET_ALL)
+        passes = build_encode_commands(input_path, output_path, ext, video_bitrate_kbps, sub_option, sub_path, work_dir,
+                                       fps_mode_option(), encoder)
+        print(Fore.YELLOW + f"\nRunning ffmpeg ({encoder.label}, {len(passes)} pass(es)) with subtitles option: "
+              f"{sub_option}\n" + Style.RESET_ALL)
+        run(passes, _GPU_SESSIONS if encoder.hardware else contextlib.nullcontext())
     finally:
         shutil.rmtree(work_dir, ignore_errors=True)
 
 
-def build_two_pass_commands(input_path, output_path, ext, video_bitrate_kbps, sub_option, sub_path, work_dir,
-                            fps_mode="-fps_mode"):
+def build_encode_commands(input_path, output_path, ext, video_bitrate_kbps, sub_option, sub_path, work_dir,
+                          fps_mode="-fps_mode", encoder=encoders.DEFAULT):
     """
-    ffmpeg commands of a two-pass encode: the first pass only analyses the video, the second one
-    uses these statistics to distribute the bits and hit the target size (a single pass can overshoot it).
+    ffmpeg commands that encode the video at the bitrate that fits the target size.
+    Two-pass encoders (x264, x265) first analyse the video, then use these statistics to distribute
+    the bits and hit the target size precisely; the other encoders (GPU, SVT-AV1) use a single pass.
     Both passes must encode exactly the same frames: the timestamps are passed through, otherwise
     the MP4 output of the second pass can duplicate a frame that the first pass did not analyse
     (x264 then fails with "Incomplete MB-tree stats file" or even hangs).
@@ -117,26 +139,50 @@ def build_two_pass_commands(input_path, output_path, ext, video_bitrate_kbps, su
     Returns:
         list: (command, share of the total work) for each pass.
     """
-    video_args = []
-    if sub_option == "hard" and sub_path:
-        # Plain relative name, resolved in the working directory: no filter escaping needed
-        video_args += ["-vf", f"subtitles={os.path.basename(sub_path)}"]
-    video_args += [fps_mode, "passthrough",
-                   "-c:v", "libx264", "-b:v", f"{video_bitrate_kbps}k", "-preset", "medium",
-                   "-passlogfile", os.path.join(work_dir, "ffmpeg2pass")]
+    # Plain relative subtitle name, resolved in the working directory: no filter escaping needed
+    filters = [f"subtitles={os.path.basename(sub_path)}"] if sub_option == "hard" and sub_path else []
+    video_args = [*encoders.filter_args(encoder, filters), fps_mode, "passthrough",
+                  *encoders.bitrate_args(encoder, video_bitrate_kbps)]
+    hw_input = encoders.input_args(encoder)
     if sub_option == "soft" and sub_path:
-        inputs = ["-i", input_path, "-i", sub_path]
+        inputs = [*hw_input, "-i", input_path, "-i", sub_path]
         maps = ["-map", "0:v", "-map", "0:a?", "-map", "1:s"]
         video_maps = ["-map", "0:v"]  # both passes must encode the same video streams
         # mov_text is the only text subtitle codec of MP4, MKV takes SRT/ASS as they are
         subtitle_args = ["-c:s", "mov_text" if ext == "mp4" else "copy"]
     else:
-        inputs, maps, video_maps, subtitle_args = ["-i", input_path], [], [], []
+        inputs, maps, video_maps, subtitle_args = [*hw_input, "-i", input_path], [], [], []
     audio_args = ["-c:a", "aac", "-ac", "2", "-ar", "48000", "-b:a", f"{AUDIO_BITRATE // 1000}k"]
-    pass1 = ["ffmpeg", "-y", "-i", input_path, *video_maps, *video_args, "-pass", "1", "-an", "-sn", "-f", "null", "-"]
-    pass2 = ["ffmpeg", "-y", *inputs, *maps, *video_args, "-pass", "2", *audio_args, *subtitle_args,
+    output_args = [*maps, *video_args, *audio_args, *subtitle_args, "-movflags", "+faststart", output_path]
+    if not encoder.two_pass:
+        return [(["ffmpeg", "-y", *inputs, *output_args], 1.0)]
+
+    def pass_args(number):
+        if encoder.name == "libx265":
+            # Relative statistics file, in the working directory: x265-params uses ':' as separator
+            return ["-x265-params", f"pass={number}:stats=x265_2pass.log:log-level=error"]
+        return ["-pass", str(number), "-passlogfile", os.path.join(work_dir, "ffmpeg2pass")]
+
+    pass1 = ["ffmpeg", "-y", *hw_input, "-i", input_path, *video_maps, *video_args, *pass_args(1),
+             "-an", "-sn", "-f", "null", "-"]
+    pass2 = ["ffmpeg", "-y", *inputs, *maps, *video_args, *pass_args(2), *audio_args, *subtitle_args,
              "-movflags", "+faststart", output_path]
     return [(pass1, FIRST_PASS_SHARE), (pass2, 1 - FIRST_PASS_SHARE)]
+
+
+def build_copy_command(input_path, output_path, ext, sub_option, sub_path):
+    """ffmpeg command that copies the streams without re-encoding (for a file already under the target size)."""
+    cmd = ["ffmpeg", "-y", "-i", input_path]
+    maps = ["-map", "0:v", "-map", "0:a?"]
+    if sub_option == "soft" and sub_path:
+        cmd += ["-i", sub_path]
+        maps += ["-map", "1:s"]
+    else:
+        maps += ["-map", "0:s?"]
+    cmd += [*maps, "-c", "copy"]
+    if ext == "mp4":
+        cmd += ["-c:s", "mov_text", "-movflags", "+faststart"]
+    return cmd + [output_path]
 
 
 def _encode(passes, duration, work_dir, report):

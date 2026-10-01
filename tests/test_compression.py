@@ -27,9 +27,11 @@ def test_too_small_target_is_below_the_minimum():
     assert compute_video_bitrate_kbps(0.0001, 20, 1) < MIN_VIDEO_BITRATE_KBPS
 
 
-def two_pass(sub_option="none", sub_path=None, ext="mp4"):
-    from compression import build_two_pass_commands
-    return build_two_pass_commands("in.mkv", "out." + ext, ext, 1500, sub_option, sub_path, "work", "-fps_mode")
+def two_pass(sub_option="none", sub_path=None, ext="mp4", encoder="libx264"):
+    from compression import build_encode_commands
+    from encoders import BY_NAME
+    return build_encode_commands("in.mkv", "out." + ext, ext, 1500, sub_option, sub_path, "work", "-fps_mode",
+                                 BY_NAME[encoder])
 
 
 def option(cmd, name):
@@ -54,7 +56,7 @@ def test_both_passes_encode_the_same_frames_with_the_same_settings():
 
 def test_burned_subtitles_are_rendered_in_both_passes():
     for cmd, _ in two_pass("hard", "work/subtitles.srt"):
-        assert option(cmd, "-vf") == "subtitles=subtitles.srt"  # relative to the working directory
+        assert option(cmd, "-vf").startswith("subtitles=subtitles.srt,")  # relative to the working directory
 
 
 def test_soft_subtitles_codec_depends_on_the_container():
@@ -72,3 +74,28 @@ def test_a_stuck_ffmpeg_is_killed(monkeypatch):
     start = time.time()
     assert not compression._encode([(silent_command, 1.0)], 10, None, lambda *progress: None)
     assert time.time() - start < 15
+
+
+def test_x265_two_passes_share_a_relative_statistics_file():
+    (pass1, _), (pass2, _) = two_pass(encoder="libx265")
+    assert option(pass1, "-x265-params") == "pass=1:stats=x265_2pass.log:log-level=error"
+    assert option(pass2, "-x265-params") == "pass=2:stats=x265_2pass.log:log-level=error"
+
+
+def test_gpu_encoders_use_a_single_pass():
+    [(cmd, share)] = two_pass(encoder="hevc_nvenc")
+    assert share == 1 and "-pass" not in cmd and option(cmd, "-c:v") == "hevc_nvenc"
+    assert option(cmd, "-fps_mode") == "passthrough" and cmd[-1] == "out.mp4"
+
+
+def test_vaapi_device_comes_before_the_input():
+    [(cmd, _)] = two_pass(encoder="h264_vaapi")
+    assert cmd.index("-vaapi_device") < cmd.index("-i")
+
+
+def test_copy_command_keeps_the_streams_as_they_are():
+    from compression import build_copy_command
+    mp4 = build_copy_command("in.mkv", "out.mp4", "mp4", "soft", "work/subtitles.srt")
+    assert option(mp4, "-c") == "copy" and option(mp4, "-c:s") == "mov_text" and "1:s" in mp4
+    mkv = build_copy_command("in.mkv", "out.mkv", "mkv", "none", None)
+    assert "-c:s" not in mkv and "0:s?" in mkv
