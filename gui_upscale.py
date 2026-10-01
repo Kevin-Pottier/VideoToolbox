@@ -1,6 +1,7 @@
 import math
 import os
 import queue
+import re
 import shutil
 import subprocess
 import sys
@@ -38,6 +39,8 @@ PNG_BYTES_PER_PIXEL = 2.0
 # Upscaled frames written per chunk (about): only a few chunks are on the disk at the same time
 CHUNK_BYTES = 1_000_000_000
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
+# Real-ESRGAN prints the progress of a frame ("25.00%") when it starts each of its tiles
+TILE_PROGRESS = re.compile(r"^(\d+(?:\.\d+)?)%$", re.MULTILINE)
 
 
 class UpscaleError(Exception):
@@ -106,10 +109,56 @@ def estimate_temp_space(info, scale=4):
     return int(frames * pixels * (2 * PNG_BYTES_PER_PIXEL + 3 * scale * scale * JPEG_BYTES_PER_PIXEL))
 
 
+def _format_size(size):
+    """Bytes as a short readable size: "750 MB", "3.5 GB"."""
+    return f"{size / 1e9:.1f} GB" if size >= 1e9 else f"{max(size, 1e6) / 1e6:.0f} MB"
+
+
+def confirm_temp_space(root, needed, free, outdir):
+    """
+    Tell how much temporary disk space the upscaling needs, and let the user decide whether to start.
+    When the folder has not enough free space, the question is a warning and "No" is the default answer.
+    Returns True to start the upscaling.
+    """
+    enough = needed <= free
+    message = (f"The upscaling needs about {_format_size(needed)} of temporary disk space (frames deleted at the "
+               f"end), plus the upscaled videos, in:\n{outdir}\n\nFree space: {_format_size(free)}.")
+    if not enough:
+        message += "\n\n⚠ This is not enough: the upscaling will probably fail when the disk is full."
+    return messagebox.askyesno("Temporary disk space" if enough else "Not enough disk space",
+                               message + "\n\nStart the upscaling?", icon="question" if enough else "warning",
+                               default="yes" if enough else "no", parent=root)
+
+
 def _format_duration(seconds):
     hours, rem = divmod(int(seconds), 3600)
     mins, secs = divmod(rem, 60)
+    if hours >= 48:
+        return f"{hours // 24} days {hours % 24} h"
     return f"{hours}:{mins:02d}:{secs:02d}" if hours else f"{mins:02d}:{secs:02d}"
+
+
+def _speed_text(seconds_per_frame):
+    if seconds_per_frame < 1:
+        return f"{1 / seconds_per_frame:.1f} frames/s"
+    return f"{_format_duration(seconds_per_frame)} per frame" if seconds_per_frame >= 60 else f"{seconds_per_frame:.0f} s per frame"
+
+
+def frames_done(log_text, finished):
+    """
+    Frames upscaled, fractions included, from the log of Real-ESRGAN and the number of finished frames.
+    Real-ESRGAN prints the progress of a frame when it starts each of its tiles ("0.00%", "25.00%", "50.00%",
+    "75.00%" for 4 tiles; frames processed at the same time are interleaved): every line but the last one
+    of each frame in progress is a finished tile. This measures the progress inside frames that take
+    minutes (a large frame upscaled x4 on a modest GPU), so that the time left does not wait for them.
+    """
+    values = [float(value) for value in TILE_PROGRESS.findall(log_text)]
+    steps = [value for value in values if value > 0]
+    if not steps:  # the size of the tiles is not known before the first tile is finished
+        return finished
+    tiles_per_frame = round(100 / min(steps))
+    in_progress = max(values.count(0.0) - finished, 0)  # each frame starts with "0.00%"
+    return max(finished, (len(values) - in_progress) / tiles_per_frame)
 
 
 def _log_tail(log_path, lines=12):
@@ -307,7 +356,10 @@ def upscale_video(filepath, info, target_height, outdir, report, cancel_event, m
             while proc.poll() is None:
                 if stop.is_set() or cancel_event.is_set():
                     break
-                report("progress", counts["upscaled"] + len(os.listdir(up_dir)))
+                # Finished frames, and the finished tiles of the frames in progress
+                with open(logs["upscale"], encoding="utf-8", errors="replace") as log:
+                    done = frames_done(log.read(), len(os.listdir(up_dir)))
+                report("progress", counts["upscaled"] + min(done, n_frames))
                 time.sleep(1)
             if stop.is_set() or cancel_event.is_set():
                 break
@@ -409,6 +461,7 @@ def run_upscale_jobs(root, jobs, outdir, model=MODELS[0], encoder=None):
                     print(f"[{msg[3]}] Upscaling...")
                 elif kind == "stage":
                     stage["total"], stage["start"] = max(msg[2], 1), time.time()
+                    stage.pop("first", None)
                     stage_label.config(text=msg[1])
                     progress_bar.config(maximum=stage["total"])
                     progress_var.set(0)
@@ -417,8 +470,14 @@ def run_upscale_jobs(root, jobs, outdir, model=MODELS[0], encoder=None):
                     done = min(msg[1], stage["total"])
                     progress_var.set(done)
                     if done > 0:
-                        remaining = (time.time() - stage["start"]) / done * (stage["total"] - done)
-                        eta_label.config(text=f"Time left: {_format_duration(remaining)}")
+                        # Speed measured from the first finished work: the start (model loading) does not count
+                        first_time, first_done = stage.setdefault("first", (time.time(), done))
+                        if done > first_done:
+                            per_frame = (time.time() - first_time) / (done - first_done)
+                        else:
+                            per_frame = (time.time() - stage["start"]) / done
+                        eta_label.config(text=f"Time left: {_format_duration(per_frame * (stage['total'] - done))}"
+                                              f"\nframe {int(done) + 1}/{stage['total']}, {_speed_text(per_frame)}")
                 elif kind == "result":
                     name, ok, detail = msg[1:]
                     results.append((name, ok, detail))
@@ -564,12 +623,9 @@ def _run_video_upscale(root):
     needed = max(estimate_temp_space(info, model_scale(model, info["height"], target_height))
                  for _, info, target_height in jobs)
     free = shutil.disk_usage(outdir).free
-    print(f"Estimated temporary disk space: {needed / 1e9:.1f} GB (free: {free / 1e9:.1f} GB)")
-    if needed > free and not messagebox.askyesno(
-            "Not enough disk space?",
-            f"Upscaling needs roughly {needed / 1e9:.0f} GB of temporary frames, "
-            f"but only {free / 1e9:.0f} GB are free in:\n{outdir}\n\nContinue anyway?",
-            icon="warning", parent=root):
+    print(f"Estimated temporary disk space: {_format_size(needed)} (free: {_format_size(free)})")
+    if not confirm_temp_space(root, needed, free, outdir):
+        print("Upscaling cancelled.")
         return
 
     print(f"--- Upscale jobs to perform ({model.name}, {encoder.label}) ---")

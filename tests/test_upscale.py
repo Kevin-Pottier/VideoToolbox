@@ -86,9 +86,63 @@ def test_only_higher_resolutions_are_offered(height, expected):
     assert [h for _, h in gu.upscale_resolution_choices(640, height)] == expected
 
 
-@pytest.mark.parametrize("seconds, expected", [(0, "00:00"), (59, "00:59"), (3599, "59:59"), (3725, "1:02:05")])
+@pytest.mark.parametrize("size, expected", [(0, "1 MB"), (54e6, "54 MB"), (999e6, "999 MB"), (3.5e9, "3.5 GB")])
+def test_format_size(size, expected):
+    assert gu._format_size(size) == expected
+
+
+@pytest.mark.parametrize("answer", [True, False])
+def test_the_temporary_space_is_always_announced_and_can_be_refused(monkeypatch, answer):
+    questions = []
+    monkeypatch.setattr(gu.messagebox, "askyesno", lambda title, message, **options: questions.append(
+        (title, message, options)) or answer)
+    assert gu.confirm_temp_space(None, 3.5e9, 120e9, "D:/Films") is answer
+    [(title, message, options)] = questions
+    assert title == "Temporary disk space" and options["icon"] == "question" and options["default"] == "yes"
+    assert "about 3.5 GB" in message and "D:/Films" in message and "Free space: 120.0 GB" in message
+
+
+def test_not_enough_space_is_a_warning_answered_no_by_default(monkeypatch):
+    questions = []
+    monkeypatch.setattr(gu.messagebox, "askyesno", lambda title, message, **options: questions.append(
+        (title, message, options)) or False)
+    assert not gu.confirm_temp_space(None, 3.5e9, 2e9, "D:/Films")
+    [(title, message, options)] = questions
+    assert title == "Not enough disk space" and options["icon"] == "warning" and options["default"] == "no"
+    assert "not enough" in message
+
+
+@pytest.mark.parametrize("seconds, expected", [(0, "00:00"), (59, "00:59"), (3599, "59:59"), (3725, "1:02:05"),
+                                               (47 * 3600, "47:00:00"), (235 * 3600 + 59, "9 days 19 h")])
 def test_format_duration(seconds, expected):
     assert gu._format_duration(seconds) == expected
+
+
+@pytest.mark.parametrize("seconds_per_frame, expected", [(0.25, "4.0 frames/s"), (7.4, "7 s per frame"),
+                                                         (600, "10:00 per frame")])
+def test_speed_text(seconds_per_frame, expected):
+    assert gu._speed_text(seconds_per_frame) == expected
+
+
+HEADER = "[0 Intel(R) UHD Graphics]  queueC=1[1]  queueG=0[1]  queueT=2[1]\n"
+
+
+def tiles(count):
+    return "".join(f"{100 * i / count:.2f}%\n" for i in range(count))
+
+
+@pytest.mark.parametrize("log, finished, frames", [
+    (HEADER, 0, 0),
+    (HEADER + "0.00%\n", 0, 0),  # first tile in progress: the number of tiles is not known yet
+    (HEADER + "0.00%\n25.00%\n50.00%\n", 0, 0.5),  # third tile in progress: 2 of 4 finished
+    (HEADER + "0.00%\n0.00%\n25.00%\n25.00%\n50.00%\n", 0, 0.75),  # two frames at a time: 2 + 1 tiles
+    (HEADER + tiles(60) * 2 + "0.00%\n", 2, 2),  # 60 tiles a frame, 2 frames saved, the third one starts
+    (HEADER + tiles(60) * 2 + "0.00%\n", 1, 1 + 59 / 60),  # the second frame is not saved yet
+    (HEADER + tiles(4) * 2, 2, 2),  # real log of 2 frames
+])
+def test_frames_done_counts_the_finished_tiles_of_the_frames_in_progress(log, finished, frames):
+    # Upscaling a 1080p frame x4 on an integrated GPU takes minutes: the time left must not wait for it
+    assert gu.frames_done(log, finished) == pytest.approx(frames)
 
 
 def test_log_tail_skips_realesrgan_progress_lines(tmp_path):
