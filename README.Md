@@ -83,7 +83,7 @@ GPU encoders by graphics card (the FFmpeg builds of gyan.dev, installed by `wing
 | Intel / AMD on Linux | VAAPI | depends on the driver | | |
 | Mac | VideoToolbox | yes | yes | no |
 
-Measured on a 4-core virtual machine without GPU (720p clip with film grain, every encoder at 1200 kbps): x264 2 passes 29 fps, x265 2 passes 23 fps (+0.3 dB SSIM), SVT-AV1 38 fps (+0.8 dB SSIM, 17% smaller file). The x264 presets change little (veryfast: +24% speed, lower quality; slow: no gain on this content). GPU encoders could not be measured there: they are typically about ten times faster than x264.
+See [Metrics](#metrics) for measurements on real footage. The x264 presets change little (veryfast: +24% speed, lower quality; slow: no gain on a 720p test clip). GPU encoders could not be measured there: they are typically about ten times faster than x264.
 
 To compare the encoders on your own computer and video:
 
@@ -92,6 +92,46 @@ python scripts/benchmark_encoders.py my_movie.mkv --start 300 --duration 30 --kb
 ```
 
 It encodes the same extract with every working encoder, using the commands of the compression mode, and prints the speed (frames per second and times faster than real time), the quality compared with the extract (SSIM, PSNR, and VMAF when FFmpeg includes it) and the size compared with the target.
+
+## Metrics
+
+Measured in October 2026 on a cloud virtual machine: 4 x86-64 vCPU, 15 GB of RAM, **no GPU**, FFmpeg 6.1.1, with real footage: a 1080p30 camera video ([intel-iot-devkit/sample-videos](https://github.com/intel-iot-devkit/sample-videos), `classroom.mp4`) and the *Megamind* trailer (720x528 DivX AVI, [OpenCV samples](https://github.com/opencv/opencv/tree/4.x/samples/data)). A desktop CPU is faster, and the GPU encoders could not be measured: run `scripts/benchmark_encoders.py` on your own computer and video to get your figures.
+
+### Compression: speed and quality of the encoders
+
+1080p30 real footage, 30 s extract, measured with `scripts/benchmark_encoders.py` (SSIM in dB against the extract, higher is better: 20 dB = 0.990, 23 dB = 0.995):
+
+| Encoder | Speed (frames/s) | SSIM at 2000 kbps | SSIM at 1000 kbps | A 2 h 1080p movie (24 fps) on these 4 vCPU |
+|---|---|---|---|---|
+| H.264 - x264 (2 passes) | 33 to 41 | 22.20 dB | 20.49 dB | ≈ 1 h 30 |
+| HEVC - x265 (2 passes) | 14 to 16 | 22.67 dB | 21.37 dB | ≈ 3 h 25 |
+| AV1 - SVT-AV1 (1 pass) | 26 to 30 | 23.16 dB | 22.18 dB | ≈ 1 h 50 |
+
+- **SVT-AV1 at 1000 kbps gives the quality of x264 at 2000 kbps** (22.18 vs 22.20 dB): the same quality in a file half the size, and almost twice as fast as x265.
+- SD movie (*Megamind* trailer, 800 kbps): x264 106 frames/s (4.5 times faster than real time: a 2 h DVD movie in about 30 min), SVT-AV1 57, x265 34; at this bitrate the three give the same quality (SSIM 16.72, 16.80 and 16.81 dB).
+
+### Compression: size of the output
+
+Whole files compressed through the application (33 s 1080p movie with two audio tracks, target 0.008 GB):
+
+| Encoder | Output size / target |
+|---|---|
+| x264, 2 passes | 98.6 % |
+| x265, 2 passes | 97.3 % |
+| SVT-AV1, 1 pass | 92.7 % |
+
+In these runs the output never exceeded the target. A file already under the target is only remuxed: a few seconds whatever its length, without quality loss.
+
+### Upscaling
+
+- Temporary disk space for a 2 h movie upscaled x4 (estimate of the application): **3.5 GB with the pipeline**, instead of 507 GB (DVD, 720x480) or 1,352 GB (720p) when every frame was extracted before the upscale.
+- The animation model (`realesr-animevideov3`) was about 10 times faster than `realesrgan-x4plus` on the same frames (7.5 s vs 79 s, CPU through software Vulkan; a GPU is much faster for both).
+
+### Repository and tests
+
+- Fresh clone: **74 MB → 0.18 MB** (the Real-ESRGAN binaries and models are downloaded by `scripts/fetch_deps.py` instead of being versioned).
+- 168 automated tests (unit, real FFmpeg on generated videos, compression workflow without display), run by GitHub Actions on Linux (Python 3.9 and 3.13) and Windows: they cover 74 % of the processing code (compression, encoders, audio, subtitles); the windows are covered by the end-to-end battery below.
+- End-to-end battery (October 2026): 19 scenarios driven through the real windows from the main menu, on real footage: compression (no subtitles, soft, burned, MP4 and MKV, x264/x265/SVT-AV1, copy shortcut, batch, invalid and too small sizes, cancellation), translation (single and batch with a stand-in for Google, which refuses the requests of a cloud machine, invalid file, Google refusing the requests), upscaling with the real Real-ESRGAN (both models), audio fix, add subtitles (soft, burned, batch) and audio tracks management. It found three of the bugs fixed in October 2026 (see the changelog).
 
 ## Major Changes
 - Unified single and batch video compression into one workflow.
