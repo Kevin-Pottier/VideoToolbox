@@ -3,6 +3,7 @@ import os
 import subprocess
 import sys
 import threading
+import time
 
 import pytest
 
@@ -165,12 +166,15 @@ def test_probe_video_reads_size_rate_and_duration(tmp_path):
 
 
 FAKE_REALESRGAN = '''#!{python}
-"""Stand-in for realesrgan-ncnn-vulkan: scales every frame of -i into -o, keeping the file names."""
+"""Stand-in for realesrgan-ncnn-vulkan: scales every frame of -i into -o (same name, -f format)."""
 import os, subprocess, sys
 args = dict(zip(sys.argv[1::2], sys.argv[2::2]))
+if os.environ.get("FAKE_REALESRGAN_FAIL"):
+    sys.exit("vkCreateInstance failed")
 for name in sorted(os.listdir(args["-i"])):
-    subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", os.path.join(args["-i"], name),
-                    "-vf", "scale=iw*{{0}}:ih*{{0}}".format(args["-s"]), os.path.join(args["-o"], name)], check=True)
+    out = os.path.join(args["-o"], os.path.splitext(name)[0] + "." + args["-f"])
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", os.path.join(args["-i"], name), "-q:v", "2",
+                    "-vf", "scale=iw*{{0}}:ih*{{0}}".format(args["-s"]), out], check=True)
 '''
 
 
@@ -288,3 +292,78 @@ def test_copy_falls_back_to_encoding_when_the_container_refuses_a_codec(tmp_path
     out = tmp_path / "wma_compressed.mp4"
     assert [s["codec_name"] for s in streams_of_type(out, "audio")] == ["aac"]
     assert count_frames(out) == count_frames(src)
+
+
+def anamorphic_clip(tmp_path, seconds=1):
+    src = tmp_path / "clip.mkv"
+    run_ffmpeg(*lavfi_video(duration=seconds, size="32x18", rate="24000/1001"), *lavfi_audio(duration=seconds),
+               "-vf", "setsar=4/3", "-c:v", "libx264", "-c:a", "flac", str(src))
+    return src
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="the fake Real-ESRGAN is a Python script with a shebang")
+def test_upscale_pipeline_with_several_chunks_and_the_animation_model(tmp_path, fake_realesrgan, monkeypatch):
+    gui_upscale = fake_realesrgan
+    monkeypatch.setattr(gui_upscale, "chunk_frames", lambda *args: 7)  # 24 frames -> 4 chunks
+    src = anamorphic_clip(tmp_path)
+    outdir = tmp_path / "out"
+    outdir.mkdir()
+    progress = []
+    anime = next(m for m in gui_upscale.MODELS if m.name == "realesr-animevideov3")
+
+    out = gui_upscale.upscale_video(str(src), gui_upscale.probe_video(str(src)), 36, str(outdir),
+                                    lambda *msg: progress.append(msg), threading.Event(), anime)
+
+    assert count_frames(out) == count_frames(src)
+    video = streams_of_type(out, "video")[0]
+    assert (video["height"], video["avg_frame_rate"]) == (36, "24000/1001")
+    assert ("progress", count_frames(src)) in progress
+    assert any("x2 with realesr-animevideov3" in msg[1] for msg in progress if msg[0] == "stage")  # 18 -> 36: x2
+    assert os.listdir(outdir) == [os.path.basename(out)]
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="the fake Real-ESRGAN is a Python script with a shebang")
+def test_upscale_with_another_encoder(tmp_path, fake_realesrgan):
+    import encoders
+    if "libx265" not in encoders._built_encoders():
+        pytest.skip("libx265 is not in this FFmpeg build")
+    gui_upscale = fake_realesrgan
+    src = anamorphic_clip(tmp_path)
+    outdir = tmp_path / "out"
+    outdir.mkdir()
+    out = gui_upscale.upscale_video(str(src), gui_upscale.probe_video(str(src)), 72, str(outdir), noop,
+                                    threading.Event(), gui_upscale.MODELS[0], encoders.BY_NAME["libx265"])
+    assert [s["codec_name"] for s in streams_of_type(out, "video")] == ["hevc"]
+    assert count_frames(out) == count_frames(src)
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="the fake Real-ESRGAN is a Python script with a shebang")
+def test_a_realesrgan_failure_is_reported_and_leaves_nothing(tmp_path, fake_realesrgan, monkeypatch):
+    gui_upscale = fake_realesrgan
+    monkeypatch.setenv("FAKE_REALESRGAN_FAIL", "1")
+    src = anamorphic_clip(tmp_path)
+    outdir = tmp_path / "out"
+    outdir.mkdir()
+    with pytest.raises(gui_upscale.UpscaleError, match="Real-ESRGAN failed"):
+        gui_upscale.upscale_video(str(src), gui_upscale.probe_video(str(src)), 72, str(outdir), noop, threading.Event())
+    assert os.listdir(outdir) == []
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="the fake Real-ESRGAN is a Python script with a shebang")
+def test_cancelling_in_the_middle_of_the_pipeline_stops_every_process(tmp_path, fake_realesrgan, monkeypatch):
+    gui_upscale = fake_realesrgan
+    monkeypatch.setattr(gui_upscale, "chunk_frames", lambda *args: 5)
+    src = anamorphic_clip(tmp_path, seconds=4)
+    outdir = tmp_path / "out"
+    outdir.mkdir()
+    cancel = threading.Event()
+
+    def report(kind, *args):
+        if kind == "progress" and args[0] >= 5:  # first chunk upscaled
+            cancel.set()
+
+    start = time.time()
+    with pytest.raises(gui_upscale.UpscaleCancelled):
+        gui_upscale.upscale_video(str(src), gui_upscale.probe_video(str(src)), 72, str(outdir), report, cancel)
+    assert time.time() - start < 30
+    assert os.listdir(outdir) == []

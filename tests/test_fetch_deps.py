@@ -38,9 +38,9 @@ def fake_release(tmp_path):
     exe_name = fetch_deps.ARCHIVES[fetch_deps.platform_key()][2]
     archive = tmp_path / "release.zip"
     with zipfile.ZipFile(archive, "w") as zf:
+        models = [f"models/{m}.{ext}" for m in fetch_deps.MODELS for ext in ("bin", "param")]
         for name in [exe_name, "vcomp140.dll", "vcomp140d.dll", "onepiece_demo.mp4",
-                     "models/realesrgan-x4plus.bin", "models/realesrgan-x4plus.param",
-                     "models/realesrnet-x4plus.bin"]:
+                     "models/realesrgan-x4plus-anime.bin", *models]:
             zf.writestr(name, f"content of {name}")
     return archive, hashlib.sha256(archive.read_bytes()).hexdigest()
 
@@ -66,7 +66,8 @@ def test_install_extracts_only_the_files_used(monkeypatch, tmp_path):
     _, _, exe_name, extra = fetch_deps.ARCHIVES[key]
     extracted = sorted(os.path.relpath(os.path.join(d, f), tool_dir).replace(os.sep, "/")
                        for d, _, files in os.walk(tool_dir) for f in files)
-    assert extracted == sorted([exe_name, *extra, "models/realesrgan-x4plus.bin", "models/realesrgan-x4plus.param"])
+    models = [f"models/{m}.{ext}" for m in fetch_deps.MODELS for ext in ("bin", "param")]
+    assert extracted == sorted([exe_name, *extra, *models])
     if key != "win32":
         assert os.stat(tool_dir / exe_name).st_mode & stat.S_IXUSR
 

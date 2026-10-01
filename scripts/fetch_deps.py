@@ -25,18 +25,18 @@ import zipfile
 REPO_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TOOL_DIR = os.path.join(REPO_DIR, "Tool")
 
-RELEASE_URL = "https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.3.0/realesrgan-ncnn-vulkan-20211212-{}.zip"
+RELEASE_URL = "https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.5.0/realesrgan-ncnn-vulkan-20220424-{}.zip"
 # sys.platform -> (archive suffix, SHA-256 of the archive, executable, other files to extract)
 ARCHIVES = {
-    "win32": ("windows", "caf96d62999e741194a28b514eb6202c09a39edcd9ced730e3f784c424cc0653",
+    "win32": ("windows", "abc02804e17982a3be33675e4d471e91ea374e65b70167abc09e31acb412802d",
               "realesrgan-ncnn-vulkan.exe", ["vcomp140.dll"]),
-    "linux": ("ubuntu", "9e4b78aa0d7796bbdab06ac50f7a424329920a4ea039655465aeed4cbff4a945",
+    "linux": ("ubuntu", "e5aa6eb131234b87c0c51f82b89390f5e3e642b7b70f2b9bbe95b6a285a40c96",
               "realesrgan-ncnn-vulkan", []),
-    "darwin": ("macos", "de6e546f3e9f582faf7b59e7e93b8d72afffcf3d69845efc6f663bc647959686",
+    "darwin": ("macos", "e0ad05580abfeb25f8d8fb55aaf7bedf552c375b5b4d9bd3c8d59764d2cc333a",
                "realesrgan-ncnn-vulkan", []),
 }
-# Model used by gui_upscale.py
-MODELS = ["realesrgan-x4plus"]
+# Models offered by gui_upscale.py: live action (x4), and the fast animation video model (x2, x3, x4)
+MODELS = ["realesrgan-x4plus", "realesr-animevideov3-x2", "realesr-animevideov3-x3", "realesr-animevideov3-x4"]
 
 FFMPEG_HINTS = {
     "win32": "winget install Gyan.FFmpeg   (or https://www.gyan.dev/ffmpeg/builds/, then add bin/ to the PATH)",
