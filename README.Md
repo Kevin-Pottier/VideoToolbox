@@ -131,7 +131,7 @@ In these runs the output never exceeded the target. A file already under the tar
 
 - Fresh clone: **74 MB → 0.18 MB** (the Real-ESRGAN binaries and models are downloaded by `scripts/fetch_deps.py` instead of being versioned).
 - 187 automated tests (unit, real FFmpeg on generated videos, compression workflow without display), run by GitHub Actions on Linux (Python 3.9 and 3.13) and Windows: they cover 74 % of the processing code (compression, encoders, audio, subtitles); the windows are covered by the end-to-end battery below.
-- End-to-end battery (October 2026): 19 scenarios driven through the real windows from the main menu, on real footage: compression (no subtitles, soft, burned, MP4 and MKV, x264/x265/SVT-AV1, copy shortcut, batch, invalid and too small sizes, cancellation), translation (single and batch with a stand-in for Google, which refuses the requests of a cloud machine, invalid file, Google refusing the requests), upscaling with the real Real-ESRGAN (both models), audio fix, add subtitles (soft, burned, batch) and audio tracks management. It found three of the bugs fixed in October 2026 (see the changelog).
+- End-to-end battery (`tests/e2e/run.py`, see [Development](#development)): 23 scenarios driven through the real windows from the main menu, on real footage: compression (no subtitles, soft, burned, MP4 and MKV, x264/x265/SVT-AV1, copy shortcut, batch, invalid and too small sizes, cancellation), translation (single and batch with a stand-in for Google, which refuses the requests of a cloud machine, invalid file, Google refusing the requests), upscaling with the real Real-ESRGAN (both models, refusal at the disk space question), audio fix, add subtitles (soft, burned, DivX AVI, batch) and audio tracks management. It found three of the bugs fixed in October 2026 (see the changelog).
 
 ## Major Changes
 - Unified single and batch video compression into one workflow.
@@ -155,6 +155,16 @@ ruff check .       # lint: undefined names, unused imports and variables...
 ```
 
 The tests live in `tests/`: the pure functions (bitrate budget, track ordering, ffmpeg commands, subtitle encodings, language codes...) are unit tested, and `test_ffmpeg_integration.py` runs the real ffmpeg on small generated videos (the upscaling test uses a stand-in for Real-ESRGAN). GitHub Actions runs the lint and the tests on Linux (Python 3.9 and 3.13) and Windows (Python 3.13) for every push and pull request.
+
+End-to-end battery: every feature driven through its real windows, from the main menu, on real footage, with the outputs checked by ffprobe (streams, sizes, frames, audio tracks, burned subtitles...):
+
+```bash
+python tests/e2e/run.py                  # every scenario: a few minutes, plus the upscaling
+python tests/e2e/run.py compress audio   # the scenarios whose name starts with these words
+python tests/e2e/run.py --list
+```
+
+The windows open and are clicked automatically: do not use the mouse or the keyboard meanwhile (on Linux without display, it runs in `xvfb-run`). The test videos (about 15 MB) are downloaded on the first run into the temporary folder of the system (not into the project, which may be synchronized by OneDrive), where the outputs of each scenario stay for inspection (`videotoolbox_e2e/work/`, the path is printed at the end). Scenarios that cannot run on the computer are skipped: GPU encoder without GPU, upscaling without Real-ESRGAN, Google Translate refusing the requests. Run it after a change, and on a computer with a GPU to test its encoder and the upscaling at full speed.
 
 ## License
 MIT
@@ -193,6 +203,7 @@ You can create a standalone `.exe` for easy sharing and use on Windows:
 - Compression keeps every audio track, French first and default, whatever the subtitle option: without subtitles or with burned ones, ffmpeg kept a single track (the English one of a VF/VO movie). The subtitle tracks of the source are kept too.
 - Compression errors are shown in a message box (they were only printed in the console, the window closed as if everything had worked); batch mode lists the failed videos.
 - Upscaling: the temporary disk space needed is always shown before starting, with the free space, and the upscaling can be refused (it was only asked when the space was missing). The time left follows the progress inside each frame (tile by tile), with the frame in progress and the time per frame: with the live action model on a 1080p source and an integrated GPU, nothing moved before the first frame was finished, after more than 10 minutes.
+- The end-to-end battery (`tests/e2e/run.py`) is part of the project.
 - AVI files of DivX/XviD movies (MPEG-4 with B-frames): adding subtitles, the audio tracks management to MKV and the copy shortcut of the compression failed ("Can't write packet with unknown timestamp"); the missing timestamps are now generated. When the copy shortcut is impossible anyway, the encode no longer makes the file bigger than the source, and a failed ffmpeg no longer leaves a broken file behind (add subtitles, audio tracks, audio fix).
 
 ### September 2026
