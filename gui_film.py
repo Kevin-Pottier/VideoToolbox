@@ -1,22 +1,121 @@
 import tkinter as tk
-from tkinter import filedialog, simpledialog, messagebox
+from tkinter import filedialog, simpledialog, messagebox, ttk
 from colorama import Fore, Style
 import os
 from compression import run_compression
 from gui_helpers import (apply_modern_theme, choose_encoder, create_styled_button, create_styled_frame,
                          create_styled_label, show_message)
 
-def run_video_compression():
-    """
-    Unified GUI workflow for compressing one or more video files with optional subtitle handling.
-    """
-    from tkinter import ttk
-    # Step 1: Select one or more video files
+
+def ask_video_files():
+    """File picker for one or more videos; returns the chosen paths (empty if cancelled)."""
     root = tk.Tk()
     root.withdraw()
     root.attributes('-topmost', True)
     file_paths = filedialog.askopenfilenames(title="Choose video file(s)", filetypes=[("Videos", "*.mp4 *.mkv *.avi *.mov *.flv *.wmv")])
     root.destroy()
+    return file_paths
+
+
+def ask_subtitles(path):
+    """
+    Subtitle dialog for one video. Returns (option, file): option is "none", "soft" or "hard",
+    file is None for "none". For "soft" and "hard" the dialog comes back until a file is chosen.
+    """
+    sub_option = None
+    sub_file = None
+    while sub_option is None or (sub_option in ("soft", "hard") and not sub_file):
+        sub_root = tk.Tk()
+        sub_root.attributes('-topmost', True)
+        sub_option_var = tk.StringVar(value="none", master=sub_root)
+        sub_file_var = tk.StringVar(value="", master=sub_root)
+        sub_root.title(f"Subtitle Options for {os.path.basename(path)}")
+        sub_root.geometry("400x300")
+        sub_root.configure(bg="#23272e")
+        apply_modern_theme(sub_root)
+        frame = create_styled_frame(sub_root)
+        frame.pack(fill="both", expand=True, padx=10, pady=10)
+        create_styled_label(frame, f"Subtitle options for:\n{os.path.basename(path)}").pack(pady=5)
+        def toggle_sub():
+            if sub_option_var.get() == "none":
+                sub_btn.state(["disabled"])
+                sub_file_var.set("")
+            else:
+                sub_btn.state(["!disabled"])
+        ttk.Radiobutton(frame, text="No subtitles", variable=sub_option_var, value="none", command=toggle_sub, style='TRadiobutton').pack(anchor="w", padx=40)
+        ttk.Radiobutton(frame, text="Softcode (attach .srt)", variable=sub_option_var, value="soft", command=toggle_sub, style='TRadiobutton').pack(anchor="w", padx=40)
+        ttk.Radiobutton(frame, text="Hardcode (burn in)", variable=sub_option_var, value="hard", command=toggle_sub, style='TRadiobutton').pack(anchor="w", padx=40)
+        sub_btn = create_styled_button(frame, "Choose Subtitle File", lambda: sub_file_var.set(filedialog.askopenfilename(title="Choose subtitle file", filetypes=[("Subtitles", "*.srt *.ass")]) or sub_file_var.get()))
+        sub_btn.pack(pady=5)
+        sub_btn.state(["disabled"])
+        sub_label = create_styled_label(frame, "", textvariable=sub_file_var)
+        sub_label.pack(pady=5)
+        def ok():
+            sub_root.quit()
+        create_styled_button(frame, "OK", ok).pack(pady=10)
+        sub_root.after(100, toggle_sub)
+        sub_root.mainloop()
+        sub_option = sub_option_var.get()
+        sub_file = sub_file_var.get() if sub_file_var.get() else None
+        sub_root.destroy()
+        if sub_option in ("soft", "hard") and not sub_file:
+            show_message("error", "Subtitle Error", "You selected a subtitle option but did not choose a subtitle file. Please choose a subtitle file.")
+    return sub_option, sub_file
+
+
+def ask_container(title="Choose Output Container", prompt="Choose the output container:"):
+    """Container dialog: returns "mp4" or "mkv"."""
+    container_root = tk.Tk()
+    container_root.withdraw()
+    container_root.attributes('-topmost', True)
+    container_choice = tk.StringVar(value="mp4", master=container_root)
+    def set_choice(val):
+        container_choice.set(val)
+        container_root.quit()
+    container_win = tk.Toplevel(container_root)
+    container_win.title(title)
+    container_win.geometry("300x150")
+    container_win.attributes('-topmost', True)
+    container_win.configure(bg="#23272e")
+    apply_modern_theme(container_win)
+    frame = create_styled_frame(container_win)
+    frame.pack(fill="both", expand=True, padx=10, pady=10)
+    create_styled_label(frame, prompt).pack(pady=10)
+    create_styled_button(frame, "MP4", lambda: set_choice("mp4"), width=15).pack(pady=5)
+    create_styled_button(frame, "MKV", lambda: set_choice("mkv"), width=15).pack(pady=5)
+    container_win.protocol("WM_DELETE_WINDOW", container_root.quit)
+    container_root.mainloop()
+    ext = container_choice.get()
+    container_root.destroy()
+    return ext
+
+
+def ask_max_size(title="Target Video Size", prompt="Enter the maximum file size in GB:"):
+    """Asks for the target size in GB until it is valid; returns None if the dialog is cancelled."""
+    while True:
+        root = tk.Tk()
+        root.withdraw()
+        root.attributes('-topmost', True)
+        size_input = simpledialog.askstring(title, prompt, parent=root)
+        root.destroy()
+        if size_input is None:
+            messagebox.showerror("❌ Error", "Unable to determine the max size.")
+            return None
+        try:
+            max_size_gb = float(size_input)
+        except ValueError:
+            max_size_gb = None
+        if max_size_gb is not None and max_size_gb > 0:
+            return max_size_gb
+        show_message("error", "Size Error", "Invalid size. Must be greater than 0.")
+
+
+def run_video_compression():
+    """
+    Unified GUI workflow for compressing one or more video files with optional subtitle handling.
+    """
+    # Step 1: Select one or more video files
+    file_paths = ask_video_files()
     if not file_paths:
         show_message("error", "File Error", "No video files selected. Please choose at least one video file.")
         return
@@ -24,69 +123,10 @@ def run_video_compression():
     # If only one file, use single-file workflow
     if len(file_paths) == 1:
         path = file_paths[0]
-        # Subtitle options
-        sub_option = None
-        sub_file = None
-        while sub_option is None or (sub_option in ("soft", "hard") and not sub_file):
-            sub_root = tk.Tk()
-            sub_root.attributes('-topmost', True)
-            sub_option_var = tk.StringVar(value="none", master=sub_root)
-            sub_file_var = tk.StringVar(value="", master=sub_root)
-            sub_root.title(f"Subtitle Options for {os.path.basename(path)}")
-            sub_root.geometry("400x300")
-            sub_root.configure(bg="#23272e")
-            apply_modern_theme(sub_root)
-            frame = create_styled_frame(sub_root)
-            frame.pack(fill="both", expand=True, padx=10, pady=10)
-            create_styled_label(frame, f"Subtitle options for:\n{os.path.basename(path)}").pack(pady=5)
-            def toggle_sub():
-                if sub_option_var.get() == "none":
-                    sub_btn.state(["disabled"])
-                    sub_file_var.set("")
-                else:
-                    sub_btn.state(["!disabled"])
-            ttk.Radiobutton(frame, text="No subtitles", variable=sub_option_var, value="none", command=toggle_sub, style='TRadiobutton').pack(anchor="w", padx=40)
-            ttk.Radiobutton(frame, text="Softcode (attach .srt)", variable=sub_option_var, value="soft", command=toggle_sub, style='TRadiobutton').pack(anchor="w", padx=40)
-            ttk.Radiobutton(frame, text="Hardcode (burn in)", variable=sub_option_var, value="hard", command=toggle_sub, style='TRadiobutton').pack(anchor="w", padx=40)
-            sub_btn = create_styled_button(frame, "Choose Subtitle File", lambda: sub_file_var.set(filedialog.askopenfilename(title="Choose subtitle file", filetypes=[("Subtitles", "*.srt *.ass")]) or sub_file_var.get()))
-            sub_btn.pack(pady=5)
-            sub_btn.state(["disabled"])
-            sub_label = create_styled_label(frame, "", textvariable=sub_file_var)
-            sub_label.pack(pady=5)
-            def ok():
-                sub_root.quit()
-            create_styled_button(frame, "OK", ok).pack(pady=10)
-            sub_root.after(100, toggle_sub)
-            sub_root.mainloop()
-            sub_option = sub_option_var.get()
-            sub_file = sub_file_var.get() if sub_file_var.get() else None
-            sub_root.destroy()
-            if sub_option in ("soft", "hard") and not sub_file:
-                show_message("error", "Subtitle Error", "You selected a subtitle option but did not choose a subtitle file. Please choose a subtitle file.")
+        # Subtitles: sub_file is None when the video is compressed without subtitles
+        sub_option, sub_file = ask_subtitles(path)
 
-        # Output container
-        container_root = tk.Tk()
-        container_root.withdraw()
-        container_root.attributes('-topmost', True)
-        container_choice = tk.StringVar(value="mp4", master=container_root)
-        def set_choice(val):
-            container_choice.set(val)
-            container_root.quit()
-        container_win = tk.Toplevel(container_root)
-        container_win.title("Choose Output Container")
-        container_win.geometry("300x150")
-        container_win.attributes('-topmost', True)
-        container_win.configure(bg="#23272e")
-        apply_modern_theme(container_win)
-        frame = create_styled_frame(container_win)
-        frame.pack(fill="both", expand=True, padx=10, pady=10)
-        create_styled_label(frame, "Choose the output container:").pack(pady=10)
-        create_styled_button(frame, "MP4", lambda: set_choice("mp4"), width=15).pack(pady=5)
-        create_styled_button(frame, "MKV", lambda: set_choice("mkv"), width=15).pack(pady=5)
-        container_win.protocol("WM_DELETE_WINDOW", container_root.quit)
-        container_root.mainloop()
-        ext = container_choice.get()
-        container_root.destroy()
+        ext = ask_container()
         if ext not in ("mp4", "mkv"):
             print(Fore.RED + "No container selected. Aborting." + Style.RESET_ALL)
             return
@@ -95,27 +135,8 @@ def run_video_compression():
             print(Fore.RED + "No encoder selected. Aborting." + Style.RESET_ALL)
             return
 
-        # Max size
-        max_size_gb = None
-
-        while max_size_gb is None or max_size_gb <= 0:
-            root = tk.Tk()
-            root.withdraw()
-            root.attributes('-topmost', True)
-            size_input = simpledialog.askstring("Target Video Size", "Enter the maximum file size in GB:", parent=root)
-            root.destroy()
-            if size_input is None:
-                messagebox.showerror("❌ Error", "Unable to determine the max size.")
-                return
-            try:
-                max_size_gb = float(size_input)
-            except ValueError:
-                max_size_gb = None
-            if max_size_gb is None or max_size_gb <= 0:
-                show_message("error", "Size Error", "Invalid size. Must be greater than 0.")
-
-        if sub_file is None:
-            messagebox.showerror("❌ Error", "Unable to determine the subtitle file.")
+        max_size_gb = ask_max_size()
+        if max_size_gb is None:
             return
 
         run_compression(path, sub_option, sub_file, ext, max_size_gb, encoder=encoder)
@@ -145,72 +166,10 @@ def run_video_compression():
 
     # Step 3: For checked videos, prompt for subtitle options; unchecked = none
     for i, path in enumerate(file_paths):
-        if not need_subs[i].get():
-            subtitle_choices[i] = ("none", None)
-            continue
-        sub_option = None
-        sub_file = None
-        while sub_option is None or (sub_option in ("soft", "hard") and not sub_file):
-            sub_root = tk.Tk()
-            sub_root.attributes('-topmost', True)
-            sub_option_var = tk.StringVar(value="none", master=sub_root)
-            sub_file_var = tk.StringVar(value="", master=sub_root)
-            sub_root.title(f"Subtitle Options for {os.path.basename(path)}")
-            sub_root.geometry("400x300")
-            sub_root.configure(bg="#23272e")
-            apply_modern_theme(sub_root)
-            frame = create_styled_frame(sub_root)
-            frame.pack(fill="both", expand=True, padx=10, pady=10)
-            create_styled_label(frame, f"Subtitle options for:\n{os.path.basename(path)}").pack(pady=5)
-            def toggle_sub():
-                if sub_option_var.get() == "none":
-                    sub_btn.state(["disabled"])
-                    sub_file_var.set("")
-                else:
-                    sub_btn.state(["!disabled"])
-            ttk.Radiobutton(frame, text="No subtitles", variable=sub_option_var, value="none", command=toggle_sub, style='TRadiobutton').pack(anchor="w", padx=40)
-            ttk.Radiobutton(frame, text="Softcode (attach .srt)", variable=sub_option_var, value="soft", command=toggle_sub, style='TRadiobutton').pack(anchor="w", padx=40)
-            ttk.Radiobutton(frame, text="Hardcode (burn in)", variable=sub_option_var, value="hard", command=toggle_sub, style='TRadiobutton').pack(anchor="w", padx=40)
-            sub_btn = create_styled_button(frame, "Choose Subtitle File", lambda: sub_file_var.set(filedialog.askopenfilename(title="Choose subtitle file", filetypes=[("Subtitles", "*.srt *.ass")]) or sub_file_var.get()))
-            sub_btn.pack(pady=5)
-            sub_btn.state(["disabled"])
-            sub_label = create_styled_label(frame, "", textvariable=sub_file_var)
-            sub_label.pack(pady=5)
-            def ok():
-                sub_root.quit()
-            create_styled_button(frame, "OK", ok).pack(pady=10)
-            sub_root.after(100, toggle_sub)
-            sub_root.mainloop()
-            sub_option = sub_option_var.get()
-            sub_file = sub_file_var.get() if sub_file_var.get() else None
-            sub_root.destroy()
-            if sub_option in ("soft", "hard") and not sub_file:
-                show_message("error", "Subtitle Error", "You selected a subtitle option but did not choose a subtitle file. Please choose a subtitle file.")
-        subtitle_choices[i] = (sub_option, sub_file)
+        subtitle_choices[i] = ask_subtitles(path) if need_subs[i].get() else ("none", None)
 
     # Step 3: Output container (reuse logic)
-    container_root = tk.Tk()
-    container_root.withdraw()
-    container_root.attributes('-topmost', True)
-    container_choice = tk.StringVar(value="mp4", master=container_root)
-    def set_choice(val):
-        container_choice.set(val)
-        container_root.quit()
-    container_win = tk.Toplevel(container_root)
-    container_win.title("Choose Output Container (Multiple)")
-    container_win.geometry("300x150")
-    container_win.attributes('-topmost', True)
-    container_win.configure(bg="#23272e")
-    apply_modern_theme(container_win)
-    frame = create_styled_frame(container_win)
-    frame.pack(fill="both", expand=True, padx=10, pady=10)
-    create_styled_label(frame, "Choose the output container (applies to all):").pack(pady=10)
-    create_styled_button(frame, "MP4", lambda: set_choice("mp4"), width=15).pack(pady=5)
-    create_styled_button(frame, "MKV", lambda: set_choice("mkv"), width=15).pack(pady=5)
-    container_win.protocol("WM_DELETE_WINDOW", container_root.quit)
-    container_root.mainloop()
-    ext = container_choice.get()
-    container_root.destroy()
+    ext = ask_container("Choose Output Container (Multiple)", "Choose the output container (applies to all):")
     if ext not in ("mp4", "mkv"):
         print(Fore.RED + "No container selected. Aborting." + Style.RESET_ALL)
         return
@@ -220,27 +179,12 @@ def run_video_compression():
         return
 
     # Step 4: Max size (reuse logic)
-    max_size_gb = None
-
-    while max_size_gb is None or max_size_gb <= 0:
-        root = tk.Tk()
-        root.withdraw()
-        root.attributes('-topmost', True)
-        size_input = simpledialog.askstring("Target Video Size (Multiple)", "Enter the maximum file size in GB (applies to all):", parent=root)
-        root.destroy()
-        if size_input is None:
-            messagebox.showerror("❌ Error", "Unable to determine the max size.")
-            return
-        try:
-            max_size_gb = float(size_input)
-        except ValueError:
-            max_size_gb = None
-        if max_size_gb is None or max_size_gb <= 0:
-            show_message("error", "Size Error", "Invalid size. Must be greater than 0.")
+    max_size_gb = ask_max_size("Target Video Size (Multiple)", "Enter the maximum file size in GB (applies to all):")
+    if max_size_gb is None:
+        return
 
     import threading
     import queue
-    from tkinter import ttk
 
     # GUI window for batch progress with scrollbar
     progress_root = tk.Tk()
@@ -288,9 +232,6 @@ def run_video_compression():
     def compress_one(idx, path, sub_option, sub_file):
         def gui_progress(percent, mins, secs):
             progress_queues[idx].put((percent, mins, secs))
-        if max_size_gb == None:
-            messagebox.showerror("❌ Error", "Unable to determine the max size.")
-            return
         run_compression(path, sub_option, sub_file, ext, max_size_gb, gui_progress=gui_progress, encoder=encoder)
         # Ensure bar is set to 100% at the end
         progress_queues[idx].put((100, 0, 0))
