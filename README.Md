@@ -91,7 +91,7 @@ To compare the encoders on your own computer and video:
 python scripts/benchmark_encoders.py my_movie.mkv --start 300 --duration 30 --kbps 2500
 ```
 
-It encodes the same extract with every working encoder, using the commands of the compression mode, and prints the speed (frames per second and times faster than real time), the quality compared with the extract (SSIM, PSNR, and VMAF when FFmpeg includes it) and the size compared with the target.
+It encodes the same extract with every working encoder, using the commands of the compression mode, and prints the speed (frames per second and times faster than real time), the quality compared with the extract (SSIM, PSNR, and VMAF when FFmpeg includes it) and the size compared with the target. Choose a `--kbps` lower than the bitrate of the source (a warning tells when it is not): with more bits than they need, all the encoders give the quality of the source and the comparison shows nothing. A video shorter than `--start` + `--duration` is measured from its end.
 
 ## Metrics
 

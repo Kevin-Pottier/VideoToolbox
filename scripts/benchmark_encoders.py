@@ -55,11 +55,17 @@ def main():
     parser.add_argument("--kbps", type=int, default=2500, help="video bitrate given to every encoder (default 2500)")
     args = parser.parse_args()
 
+    source = ffprobe_streams(args.video)
+    start = args.start
+    if source.duration and start + args.duration > source.duration:
+        # A start after the end gave the last few seconds only (from the last keyframe)
+        start = max(0.0, source.duration - args.duration)
+        print(f"The video lasts {source.duration:.0f} s: the extract starts at {start:.0f} s instead of {args.start:.0f} s.")
     work_dir = tempfile.mkdtemp(prefix="videotoolbox_bench_")
     try:
         extract = os.path.join(work_dir, "extract.mkv")
-        # Stream copy: fast and lossless (the extract starts on the keyframe before --start)
-        subprocess.run(["ffmpeg", "-v", "error", "-y", *COPY_INPUT_FLAGS, "-ss", str(args.start), "-i", args.video,
+        # Stream copy: fast and lossless (the extract starts on the keyframe before the start)
+        subprocess.run(["ffmpeg", "-v", "error", "-y", *COPY_INPUT_FLAGS, "-ss", str(start), "-i", args.video,
                         "-t", str(args.duration),
                         "-map", "0:v:0", "-map", "0:a:0?", "-c", "copy", extract], check=True)
         media = ffprobe_streams(extract)
@@ -69,6 +75,12 @@ def main():
                                     capture_output=True, text=True).stdout.strip())
         print(f"Extract: {video.width}x{video.height}, {frames} frames, {media.duration:.1f} s, "
               f"video at {args.kbps} kbps")
+        if source.duration:
+            source_kbps = os.path.getsize(args.video) * 8 / source.duration / 1000
+            if args.kbps > 0.75 * source_kbps:
+                print(f"Note: the whole source has about {source_kbps:.0f} kbps (video and audio). With {args.kbps} kbps "
+                      "the encoders get more bits than they need: their sizes stay under the target and their qualities "
+                      "close to the source. Choose a lower --kbps (e.g. half of it) to compare them.")
         print("Detecting the encoders...")
         available = encoders.available_encoders()
         vmaf = has_vmaf()
