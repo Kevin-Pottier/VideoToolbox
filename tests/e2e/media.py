@@ -82,8 +82,8 @@ def movie_lines(count=600):
     return [" ".join(words) for words in combos[:count]]
 
 
-def ffmpeg(*args):
-    subprocess.run(["ffmpeg", "-v", "error", "-y", *args], check=True)
+def ffmpeg(*args, level="error"):
+    subprocess.run(["ffmpeg", "-v", level, "-y", *args], check=True)
 
 
 def build():
@@ -110,10 +110,12 @@ def build():
            "-disposition:a:0", "default", "-disposition:a:1", "0", "-shortest", out("film.mkv"))
     shutil.copyfile(cockatoo, out("cockatoo.mp4"))
     shutil.copyfile(megamind, out("megamind.avi"))
-    # Short extracts: Real-ESRGAN without GPU (software Vulkan) takes seconds per frame
-    ffmpeg("-i", megamind, "-t", "2", "-c:v", "libx264", "-crf", "16", "-c:a", "aac", out("megamind_2s.mkv"))
+    # Short extracts: Real-ESRGAN without GPU (software Vulkan) takes seconds per frame. The last AC3 frame
+    # of the trailer is incomplete: ffmpeg reports it as an error, harmless here
+    ffmpeg("-i", megamind, "-t", "2", "-c:v", "libx264", "-crf", "16", "-c:a", "aac", out("megamind_2s.mkv"),
+           level="fatal")
     ffmpeg("-i", megamind, "-frames:v", "12", "-t", "0.5", "-vf", "scale=360:-2", "-c:v", "libx264", "-crf", "16",
-           "-c:a", "aac", out("megamind_small.mkv"))
+           "-c:a", "aac", out("megamind_small.mkv"), level="fatal")
     open(marker, "w").close()
     return BUILT
 
