@@ -2,7 +2,7 @@ import tkinter as tk
 from tkinter import filedialog, simpledialog, messagebox, ttk
 from colorama import Fore, Style
 import os
-from compression import run_compression
+from compression import CompressionError, run_compression
 from gui_helpers import (apply_modern_theme, choose_encoder, create_styled_button, create_styled_frame,
                          create_styled_label, show_message)
 
@@ -139,7 +139,11 @@ def run_video_compression():
         if max_size_gb is None:
             return
 
-        run_compression(path, sub_option, sub_file, ext, max_size_gb, encoder=encoder)
+        try:
+            run_compression(path, sub_option, sub_file, ext, max_size_gb, encoder=encoder)
+        except CompressionError as e:
+            print(Fore.RED + f"❌ {e}" + Style.RESET_ALL)
+            show_message("error", "Compression failed", f"{os.path.basename(path)}:\n{e}")
         return
 
     # MULTIPLE FILES WORKFLOW (improved subtitle selection)
@@ -228,11 +232,16 @@ def run_video_compression():
 
     # Thread-safe queue for progress updates
     progress_queues = [queue.Queue() for _ in file_paths]
+    failures = {}  # index of the video -> reason, filled by the worker threads, shown at the end
 
     def compress_one(idx, path, sub_option, sub_file):
         def gui_progress(percent, mins, secs):
             progress_queues[idx].put((percent, mins, secs))
-        run_compression(path, sub_option, sub_file, ext, max_size_gb, gui_progress=gui_progress, encoder=encoder)
+        try:
+            run_compression(path, sub_option, sub_file, ext, max_size_gb, gui_progress=gui_progress, encoder=encoder)
+        except CompressionError as e:
+            print(Fore.RED + f"❌ {os.path.basename(path)}: {e}" + Style.RESET_ALL)
+            failures[idx] = str(e)
         # Ensure bar is set to 100% at the end
         progress_queues[idx].put((100, 0, 0))
 
@@ -259,14 +268,20 @@ def run_video_compression():
             progress_root.after(200, update_bars)
         else:
             # Finalize all bars to 100% and ETA to 00:00
-            for bar, eta in zip(bars, eta_labels):
+            for i, (bar, eta) in enumerate(zip(bars, eta_labels)):
                 bar['value'] = 100
-                eta['text'] = "Time left: 00:00"
+                eta['text'] = "❌ Failed" if i in failures else "Time left: 00:00"
             progress_root.update_idletasks()
-            create_styled_label(progress_root, "Multiple videos compression complete.", style='TLabel', foreground="green").pack(pady=10)
+            done = len(file_paths) - len(failures)
+            create_styled_label(progress_root, f"Multiple videos compression complete: {done}/{len(file_paths)} compressed.",
+                                style='TLabel', foreground="green" if not failures else "orange").pack(pady=10)
+            if failures:
+                show_message("error", "Compression failed", "\n\n".join(
+                    f"{os.path.basename(file_paths[i])}:\n{failures[i]}" for i in sorted(failures)))
             progress_root.after(2000, progress_root.destroy)
 
     update_bars()
     progress_root.mainloop()
 
-    print(Fore.GREEN + f"\nMultiple videos compression complete. {len(file_paths)} files processed." + Style.RESET_ALL)
+    print(Fore.GREEN + f"\nMultiple videos compression complete: {len(file_paths) - len(failures)}/{len(file_paths)} "
+          "files compressed." + Style.RESET_ALL)

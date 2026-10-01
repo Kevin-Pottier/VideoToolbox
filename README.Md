@@ -47,7 +47,7 @@ Modern, user-friendly Python GUI for compressing or upscaling one or multiple vi
    python main.py
    ```
 4. Choose a mode:
-   - **Video Compression**: Select one or more videos, configure subtitles, output format, encoder (see [Video encoders](#video-encoders)) and size. With x264/x265 the video is encoded in two passes (an analysis pass, then the real encode) so that the file ends up just under the requested size. A file that is already under the requested size is only remuxed (streams copied in a few seconds, no quality loss, original audio kept). Batch mode shows a scrollable window with per-file progress and ETA.
+   - **Video Compression**: Select one or more videos, configure subtitles, output format, encoder (see [Video encoders](#video-encoders)) and size. With x264/x265 the video is encoded in two passes (an analysis pass, then the real encode) so that the file ends up just under the requested size. Every audio track is kept (re-encoded to stereo AAC at 192 kbps each, counted in the size), French tracks first and default, as well as the subtitle tracks of the source (in MP4, only the text ones); added soft subtitles become the first, default subtitle track. A file that is already under the requested size is only remuxed (streams copied in a few seconds, no quality loss, original audio kept). If the compression cannot be done (size too small, with the smallest possible size for the video, unreadable file, ffmpeg error), a message says why. Batch mode shows a scrollable window with per-file progress and ETA.
    - **Video Upscaling (Real-ESRGAN)**: Select one or more videos to upscale, the target resolution (720p, 1080p, 4K), the model and the encoder:
      - **Live action** (`realesrgan-x4plus`): the best quality, slow (x4, then resized to the target height).
      - **Animation** (`realesr-animevideov3`): about 10 times faster, designed for cartoons and anime, with native x2/x3/x4 networks (the smallest one that reaches the target is used).
@@ -147,6 +147,11 @@ You can create a standalone `.exe` for easy sharing and use on Windows:
 
 ## Changelog
 
+
+### October 2026
+- Compression without subtitles works again: it stopped with "Unable to determine the subtitle file" (regression of the PyCharm warnings fix).
+- Compression keeps every audio track, French first and default, whatever the subtitle option: without subtitles or with burned ones, ffmpeg kept a single track (the English one of a VF/VO movie). The subtitle tracks of the source are kept too.
+- Compression errors are shown in a message box (they were only printed in the console, the window closed as if everything had worked); batch mode lists the failed videos.
 
 ### September 2026
 - Repository made lighter: the Real-ESRGAN binaries and models (~72 MB) are no longer versioned, `scripts/fetch_deps.py` downloads them.

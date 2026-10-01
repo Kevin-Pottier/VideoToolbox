@@ -76,7 +76,7 @@ def main():
               + f" {'Size/target':>12s}")
         for encoder in available:
             output = os.path.join(work_dir, f"out_{encoder.name}.mkv")
-            passes = build_encode_commands(extract, output, "mkv", args.kbps, "none", None, work_dir,
+            passes = build_encode_commands(extract, output, "mkv", args.kbps, "none", None, work_dir, media,
                                            fps_mode_option(), encoder)
             start = time.time()
             try:

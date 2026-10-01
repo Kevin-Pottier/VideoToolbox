@@ -273,6 +273,31 @@ def french_first(audio_tracks: list[AudioTrackInfo]) -> list[AudioTrackInfo]:
     return sorted(audio_tracks, key=lambda track: not is_french_track(track))
 
 
+# Disposition flags kept when the default flag of a track changes. ffmpeg replaces all the flags
+# of a stream given with -disposition, and these names are understood by old ffmpeg versions too.
+KEPT_DISPOSITION_FLAGS = ("dub", "original", "comment", "lyrics", "karaoke", "forced", "hearing_impaired",
+                          "visual_impaired", "clean_effects", "captions", "descriptions", "dependent", "metadata")
+
+
+def french_default_dispositions(ordered_tracks: list[AudioTrackInfo]) -> list[str]:
+    """
+    -disposition arguments that make the first audio track of the output (ordered_tracks, in output
+    order, see french_first) the default one when it is French; the other flags of each track are kept.
+    Without French track, the flags of the source are left as they are.
+    """
+    if not ordered_tracks or not is_french_track(ordered_tracks[0]):
+        return []
+    args = []
+    for out_index, track in enumerate(ordered_tracks):
+        should_be_default = out_index == 0
+        if track.is_default != should_be_default:
+            flags = [flag for flag in track.disposition_flags if flag in KEPT_DISPOSITION_FLAGS]
+            if should_be_default:
+                flags.insert(0, "default")
+            args += [f"-disposition:a:{out_index}", "+".join(flags) or "0"]
+    return args
+
+
 @dataclass
 class AudioProcessingOptions:
     """

@@ -50,12 +50,7 @@ except ImportError:
     Fore = _Ansi()  # type: ignore
     Style = _Ansi()  # type: ignore
 
-from audio_tracks import ffprobe_streams, french_first, is_french_track
-
-# Disposition flags kept when the default flag of a track changes. ffmpeg replaces all the flags
-# of a stream given with -disposition, and these names are understood by old ffmpeg versions too.
-KEPT_DISPOSITION_FLAGS = ("dub", "original", "comment", "lyrics", "karaoke", "forced", "hearing_impaired",
-                          "visual_impaired", "clean_effects", "captions", "descriptions", "dependent", "metadata")
+from audio_tracks import ffprobe_streams, french_default_dispositions, french_first, is_french_track
 
 
 def _track_label(track) -> str:
@@ -89,15 +84,8 @@ def build_audio_fix_command(input_path: str, output_file: str, media, audio_chan
         "-ar", str(sample_rate),
         "-b:a", audio_bitrate,
     ]
-    if has_french:
-        # The first French track becomes the default one, the other flags of each track are kept
-        for out_index, track in enumerate(audio_tracks):
-            should_be_default = out_index == 0
-            if track.is_default != should_be_default:
-                flags = [flag for flag in track.disposition_flags if flag in KEPT_DISPOSITION_FLAGS]
-                if should_be_default:
-                    flags.insert(0, "default")
-                ffmpeg_cmd += [f"-disposition:a:{out_index}", "+".join(flags) or "0"]
+    # The first French track becomes the default one, the other flags of each track are kept
+    ffmpeg_cmd += french_default_dispositions(audio_tracks)
     ffmpeg_cmd += [
         "-movflags", "+faststart",
         output_file,

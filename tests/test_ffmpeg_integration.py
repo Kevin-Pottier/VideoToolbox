@@ -104,8 +104,37 @@ def test_compression_with_soft_subtitles_in_mkv(movie_mkv, awkward_subtitle):
     run_compression(movie_mkv, "soft", awkward_subtitle, "mkv", 0.002, gui_progress=noop)
 
     out = movie_mkv.replace(".mkv", "_compressed.mkv")
-    assert [s["codec_name"] for s in streams_of_type(out, "subtitle")] == ["subrip"]
-    assert "Léa : « ça va » €" in subtitle_text(out, 0)
+    subtitles = streams_of_type(out, "subtitle")
+    assert [(s["codec_name"], s.get("tags", {}).get("language")) for s in subtitles] == [("subrip", None), ("subrip", "eng")]
+    assert [s["disposition"]["default"] for s in subtitles] == [1, 0]
+    assert "Léa : « ça va » €" in subtitle_text(out, 0)  # the added file, then the subtitles of the source
+    assert len(streams_of_type(out, "attachment")) == 1
+
+
+@pytest.fixture
+def bilingual_mkv(tmp_path):
+    """Detailed (big) video with the English audio first and default, the French one second, English subtitles."""
+    (tmp_path / "eng.srt").write_text("1\n00:00:00,000 --> 00:00:01,000\nHello\n", encoding="utf-8")
+    path = tmp_path / "bilingual.mkv"
+    run_ffmpeg("-f", "lavfi", "-i", "testsrc2=size=320x180:rate=25:duration=2,noise=alls=30:allf=t",
+               *lavfi_audio(duration=2), *lavfi_audio(duration=2, frequency=600), "-i", str(tmp_path / "eng.srt"),
+               *(arg for i in range(4) for arg in ("-map", str(i))), "-c:v", "libx264", "-crf", "10", "-c:a", "aac",
+               "-c:s", "srt", "-metadata:s:a:0", "language=eng", "-metadata:s:a:1", "language=fre",
+               "-disposition:a:0", "default", "-disposition:a:1", "0", str(path))
+    return str(path)
+
+
+@pytest.mark.parametrize("ext, target_gb, encoded", [("mp4", 0.0003, True), ("mkv", 0.01, False)])
+def test_compression_keeps_every_audio_track_with_french_first(bilingual_mkv, ext, target_gb, encoded):
+    # Encoded (target smaller than the file) or copied, without subtitle option: the French track used to be dropped
+    import compression
+    compression.run_compression(bilingual_mkv, "none", None, ext, target_gb, gui_progress=noop)
+
+    out = bilingual_mkv.replace(".mkv", f"_compressed.{ext}")
+    audio = streams_of_type(out, "audio")
+    assert [(s["tags"]["language"], s["disposition"]["default"]) for s in audio] == [("fre", 1), ("eng", 0)]
+    assert (stream_md5(out, "0:v") != stream_md5(bilingual_mkv, "0:v")) == encoded
+    assert "Hello" in subtitle_text(out, 0)
 
 
 def test_two_pass_compression_of_an_mkv_to_mp4_hits_the_target_size(tmp_path, monkeypatch):
@@ -131,13 +160,16 @@ def test_failed_compression_leaves_no_output(movie_mkv, monkeypatch):
     monkeypatch.setattr(compression, "build_encode_commands", lambda *args, **kwargs: [(failing, 1.0)])
     output = movie_mkv.replace(".mkv", "_compressed.mp4")
     open(output, "wb").close()  # as if ffmpeg had started writing it
-    compression.run_compression(movie_mkv, "none", None, "mp4", 0.01, gui_progress=noop)
+    with pytest.raises(compression.CompressionError, match="missing input.mkv"):
+        compression.run_compression(movie_mkv, "none", None, "mp4", 0.01, gui_progress=noop)
     assert not os.path.exists(output)
 
 
 def test_compression_aborts_when_the_target_size_is_too_small(movie_mkv):
-    from compression import run_compression
-    run_compression(movie_mkv, "none", None, "mp4", 0.00001, gui_progress=noop)
+    # The reason reaches the user (it used to be printed in the console only), with the smallest possible size
+    from compression import CompressionError, run_compression
+    with pytest.raises(CompressionError, match=r"(?s)Target size too small: only 0 kbps.*smallest size for this video is 0\.001 GB"):
+        run_compression(movie_mkv, "none", None, "mp4", 0.00001, gui_progress=noop)
     assert not os.path.exists(movie_mkv.replace(".mkv", "_compressed.mp4"))
 
 
