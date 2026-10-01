@@ -12,6 +12,8 @@ from dataclasses import dataclass, field
 from typing import Optional
 from colorama import Fore, Style
 
+from utils import COPY_INPUT_FLAGS
+
 # Text subtitle codecs that can be converted to mov_text, the only text subtitle codec of MP4.
 # Image based subtitles (PGS, DVD, DVB) cannot be stored in MP4.
 MP4_CONVERTIBLE_SUBTITLE_CODECS = {"subrip", "srt", "ass", "ssa", "webvtt", "mov_text", "text"}
@@ -438,7 +440,7 @@ def build_ffmpeg_command(
     Returns:
         List of command arguments for subprocess
     """
-    cmd = ["ffmpeg", "-i", input_file]
+    cmd = ["ffmpeg", *COPY_INPUT_FLAGS, "-i", input_file]
     
     # Add video map
     from typing import Optional

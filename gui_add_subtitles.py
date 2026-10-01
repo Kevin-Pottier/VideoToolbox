@@ -22,7 +22,7 @@ def add_subtitles_to_video(video_path, sub_option, sub_file, gui_progress=None):
         gui_progress (callable): Optional callback for progress updates (percent, mins, secs).
     """
     from audio_tracks import ffprobe_streams
-    from utils import prepare_subtitle_file
+    from utils import COPY_INPUT_FLAGS, prepare_subtitle_file
     
     video_name = os.path.basename(video_path)
     video_ext = os.path.splitext(video_path)[1]
@@ -56,7 +56,7 @@ def add_subtitles_to_video(video_path, sub_option, sub_file, gui_progress=None):
         # Softcode: add the subtitle track, keeping every track of the source
         # (existing subtitles, and the fonts attached to MKV files)
         ffmpeg_cmd = [
-            "ffmpeg", "-i", input_path,
+            "ffmpeg", *COPY_INPUT_FLAGS, "-i", input_path,
             "-i", sub_path,
             "-map", "0:v", "-map", "0:a?", "-map", "0:s?", "-map", "0:t?", "-map", "1:s",
             "-c", "copy",
@@ -88,6 +88,8 @@ def add_subtitles_to_video(video_path, sub_option, sub_file, gui_progress=None):
         print(Fore.GREEN + f"\n✅ Subtitles added successfully. Output: {output_file}" + Style.RESET_ALL)
         return output_file
     else:
+        if os.path.exists(output_path):
+            os.remove(output_path)  # a failed ffmpeg leaves an unreadable file that looks like a result
         print(Fore.RED + "\n❌ Failed to add subtitles." + Style.RESET_ALL)
         return None
 

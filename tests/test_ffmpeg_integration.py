@@ -315,15 +315,58 @@ def test_a_file_already_under_the_target_size_is_copied(movie_mkv):
     assert [s["codec_name"] for s in streams_of_type(out, "subtitle")] == ["subrip"]
 
 
-def test_copy_falls_back_to_encoding_when_the_container_refuses_a_codec(tmp_path):
+def test_copy_falls_back_to_encoding_when_the_container_refuses_a_codec(tmp_path, monkeypatch):
     # WMA audio cannot be copied into MP4: the file is encoded instead
     import compression
     src = tmp_path / "wma.mkv"
     run_ffmpeg(*lavfi_video(), *lavfi_audio(), "-map", "0", "-map", "1", "-c:v", "libx264", "-c:a", "wmav2", str(src))
+    bitrates = []
+    build = compression.build_encode_commands
+    monkeypatch.setattr(compression, "build_encode_commands",
+                        lambda *args, **kwargs: bitrates.append(args[3]) or build(*args, **kwargs))
     compression.run_compression(str(src), "none", None, "mp4", 0.01, gui_progress=noop)
     out = tmp_path / "wma_compressed.mp4"
     assert [s["codec_name"] for s in streams_of_type(out, "audio")] == ["aac"]
     assert count_frames(out) == count_frames(src)
+    # About the bitrate of the source, not the whole budget (about 84000 kbps): the file was already small
+    assert bitrates and bitrates[0] < 1000
+
+
+@pytest.fixture
+def xvid_avi(tmp_path):
+    """AVI as made by DivX/XviD: MPEG-4 with B-frames, whose packets have no timestamp in AVI."""
+    path = tmp_path / "divx.avi"
+    run_ffmpeg(*lavfi_video(), *lavfi_audio(), "-c:v", "mpeg4", "-bf", "2", "-vtag", "XVID", "-c:a", "ac3", str(path))
+    return str(path)
+
+
+def test_avi_streams_are_copied_into_mkv(xvid_avi, tmp_path, awkward_subtitle):
+    # The copies failed with "Can't write packet with unknown timestamp" (and left a broken file)
+    import audio_tracks
+    import compression
+    from gui_add_subtitles import add_subtitles_to_video
+    out = add_subtitles_to_video(xvid_avi, "soft", awkward_subtitle)
+    assert out.endswith(".mkv") and count_frames(out) == count_frames(xvid_avi)
+
+    info = audio_tracks.ffprobe_streams(xvid_avi)
+    mapping = audio_tracks.build_audio_mapping_options(info, audio_tracks.AudioProcessingOptions(keep_all_audio=True))
+    tracks = str(tmp_path / "tracks.mkv")
+    subprocess.run(audio_tracks.build_ffmpeg_command(xvid_avi, tracks, mapping), check=True, capture_output=True)
+    assert count_frames(tracks) == count_frames(xvid_avi)
+
+    out = compression.run_compression(xvid_avi, "none", None, "mkv", 0.01, gui_progress=noop)
+    assert stream_md5(out, "0:v") == stream_md5(xvid_avi, "0:v")  # copied, not re-encoded
+
+
+def test_a_failed_subtitle_addition_leaves_no_output(movie_mkv, awkward_subtitle, monkeypatch):
+    import gui_add_subtitles
+
+    def failing_ffmpeg(cmd, *args):
+        open(cmd[-2], "wb").close()  # as if ffmpeg had started writing the output (before "-y")
+        return 1
+    monkeypatch.setattr(gui_add_subtitles, "_run_with_progress", failing_ffmpeg)
+    assert gui_add_subtitles.add_subtitles_to_video(movie_mkv, "soft", awkward_subtitle) is None
+    assert not os.path.exists(movie_mkv.replace(".mkv", "_with_subtitles.mkv"))
 
 
 def anamorphic_clip(tmp_path, seconds=1):

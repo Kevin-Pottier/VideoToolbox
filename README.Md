@@ -152,6 +152,7 @@ You can create a standalone `.exe` for easy sharing and use on Windows:
 - Compression without subtitles works again: it stopped with "Unable to determine the subtitle file" (regression of the PyCharm warnings fix).
 - Compression keeps every audio track, French first and default, whatever the subtitle option: without subtitles or with burned ones, ffmpeg kept a single track (the English one of a VF/VO movie). The subtitle tracks of the source are kept too.
 - Compression errors are shown in a message box (they were only printed in the console, the window closed as if everything had worked); batch mode lists the failed videos.
+- AVI files of DivX/XviD movies (MPEG-4 with B-frames): adding subtitles, the audio tracks management to MKV and the copy shortcut of the compression failed ("Can't write packet with unknown timestamp"); the missing timestamps are now generated. When the copy shortcut is impossible anyway, the encode no longer makes the file bigger than the source, and a failed ffmpeg no longer leaves a broken file behind (add subtitles, audio tracks, audio fix).
 
 ### September 2026
 - Repository made lighter: the Real-ESRGAN binaries and models (~72 MB) are no longer versioned, `scripts/fetch_deps.py` downloads them.

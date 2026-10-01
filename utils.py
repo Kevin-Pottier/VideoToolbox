@@ -6,6 +6,10 @@ import subprocess
 # French .srt files. Latin-1 never fails and is the last resort.
 SUBTITLE_ENCODINGS = ("utf-8-sig", "cp1252", "latin-1")
 
+# Stream copies generate the missing timestamps (-fflags +genpts): the AVI files of DivX/XviD movies have
+# none on their B-frames, and MKV/MP4 refuse such packets ("Can't write packet with unknown timestamp")
+COPY_INPUT_FLAGS = ["-fflags", "+genpts"]
+
 
 @functools.lru_cache(maxsize=None)
 def fps_mode_option():

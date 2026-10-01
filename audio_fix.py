@@ -51,6 +51,7 @@ except ImportError:
     Style = _Ansi()  # type: ignore
 
 from audio_tracks import ffprobe_streams, french_default_dispositions, french_first, is_french_track
+from utils import COPY_INPUT_FLAGS
 
 
 def _track_label(track) -> str:
@@ -71,7 +72,7 @@ def build_audio_fix_command(input_path: str, output_file: str, media, audio_chan
     # French tracks first. Without -map ffmpeg would keep a single audio track and at most one subtitle.
     audio_tracks = french_first(media.audio_tracks)
     has_french = is_french_track(audio_tracks[0])
-    ffmpeg_cmd = ["ffmpeg", "-i", input_path, "-map", "0:v?"]
+    ffmpeg_cmd = ["ffmpeg", *COPY_INPUT_FLAGS, "-i", input_path, "-map", "0:v?"]
     for track in audio_tracks:
         ffmpeg_cmd += ["-map", f"0:{track.stream_index}"]
     ffmpeg_cmd += ["-map", "0:s?"]
@@ -211,6 +212,8 @@ def run_audio_fix(file_path: str,
         if proc.returncode == 0:
             print(Fore.GREEN + f"\n✅ Audio fix completed. Output: {output_file}" + Style.RESET_ALL)
         else:
+            if os.path.exists(output_file):
+                os.remove(output_file)  # a failed ffmpeg leaves an unreadable file that looks like a result
             raise RuntimeError(f"ffmpeg exited with code {proc.returncode}")
 
     if gui_progress:

@@ -13,7 +13,7 @@ import time
 from colorama import Fore, Style
 from audio_tracks import MP4_CONVERTIBLE_SUBTITLE_CODECS, ffprobe_streams, french_default_dispositions, french_first
 import encoders
-from utils import fps_mode_option, prepare_subtitle_file
+from utils import COPY_INPUT_FLAGS, fps_mode_option, prepare_subtitle_file
 import subprocess
 # Import reusable GUI helpers for modern, DRY window/dialog creation
 from gui_helpers import apply_modern_theme, create_styled_frame, create_styled_label
@@ -127,6 +127,9 @@ def run_compression(file_path, sub_option, sub_file, ext, max_size_gb, gui_progr
                 return output_file
             except CompressionError:
                 print(Fore.YELLOW + "Copy impossible in this container, encoding the file instead." + Style.RESET_ALL)
+                # The file was already small enough: no need to make it bigger than the source
+                source_kbps = int(os.path.getsize(file_path) * 8 / duration / 1000)
+                video_bitrate_kbps = min(video_bitrate_kbps, max(source_kbps, MIN_VIDEO_BITRATE_KBPS))
         passes = build_encode_commands(input_path, output_path, ext, video_bitrate_kbps, sub_option, sub_path, work_dir,
                                        media, fps_mode_option(), encoder)
         print(Fore.YELLOW + f"\nRunning ffmpeg ({encoder.label}, {len(passes)} pass(es)) with subtitles option: "
@@ -222,7 +225,7 @@ def build_copy_command(input_path, output_path, ext, sub_option, sub_path, media
     with the same streams and order as an encode (see output_streams).
     """
     soft = sub_option == "soft" and bool(sub_path)
-    cmd = ["ffmpeg", "-y", "-i", input_path, *(["-i", sub_path] if soft else []), "-c", "copy",
+    cmd = ["ffmpeg", "-y", *COPY_INPUT_FLAGS, "-i", input_path, *(["-i", sub_path] if soft else []), "-c", "copy",
            *output_streams(media, ext, soft)]
     if ext == "mp4":
         cmd += ["-movflags", "+faststart"]

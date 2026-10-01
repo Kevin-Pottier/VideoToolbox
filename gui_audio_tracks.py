@@ -490,6 +490,8 @@ def show_progress_window(input_file: str, output_file: str, ffmpeg_cmd: list, du
                 print(Fore.GREEN + "✅ Processing completed successfully!" + Style.RESET_ALL)
                 events.put(("done", True, f"Audio tracks processed successfully!\n\nOutput: {os.path.basename(output_file)}"))
             else:
+                if os.path.exists(output_file):
+                    os.remove(output_file)  # a failed ffmpeg leaves an unreadable file that looks like a result
                 error_msg = "\n".join(error_output[-5:]) if error_output else "Unknown error (check console for details)"
                 print(Fore.RED + f"❌ Processing failed with code {proc.returncode}" + Style.RESET_ALL)
                 print(Fore.RED + f"Error: {error_msg}" + Style.RESET_ALL)

@@ -23,7 +23,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import encoders  # noqa: E402
 from audio_tracks import ffprobe_streams  # noqa: E402
 from compression import AUDIO_BITRATE, build_encode_commands  # noqa: E402
-from utils import fps_mode_option  # noqa: E402
+from utils import COPY_INPUT_FLAGS, fps_mode_option  # noqa: E402
 
 
 def has_vmaf():
@@ -59,7 +59,8 @@ def main():
     try:
         extract = os.path.join(work_dir, "extract.mkv")
         # Stream copy: fast and lossless (the extract starts on the keyframe before --start)
-        subprocess.run(["ffmpeg", "-v", "error", "-y", "-ss", str(args.start), "-i", args.video, "-t", str(args.duration),
+        subprocess.run(["ffmpeg", "-v", "error", "-y", *COPY_INPUT_FLAGS, "-ss", str(args.start), "-i", args.video,
+                        "-t", str(args.duration),
                         "-map", "0:v:0", "-map", "0:a:0?", "-c", "copy", extract], check=True)
         media = ffprobe_streams(extract)
         video = media.video_tracks[0]
