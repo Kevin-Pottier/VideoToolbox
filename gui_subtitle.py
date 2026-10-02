@@ -7,6 +7,7 @@ import os
 import time
 import pysrt
 from deep_translator import GoogleTranslator
+import deepl
 # Import reusable GUI helpers for modern, DRY window/dialog creation
 from gui_helpers import apply_modern_theme, create_styled_frame, create_styled_label, create_styled_button, show_message
 from utils import read_subtitle_text
@@ -106,6 +107,31 @@ def translate_lines(lines, make_translator, on_progress=None, workers=TRANSLATIO
     return [translations[text] for text in lines], sum(len(positions[text]) for text in failed)
 
 
+def translate_texts(lines, source, target, deepl_key=None, on_progress=None, make_google=None):
+    """
+    Translate subtitle texts with DeepL when a key is given, Google finishing the lines DeepL could not
+    translate (quota used up, key refused, DeepL unreachable...), else with Google.
+    Returns:
+        tuple: (translated lines, number of lines kept untranslated, note for the user, "" when none)
+    Raises:
+        TranslationBlocked: when Google keeps refusing the requests
+    """
+    make_google = make_google or (lambda: GoogleTranslator(source=source, target=target))
+    if not deepl_key:
+        translated, failed = translate_lines(lines, make_google, on_progress=on_progress)
+        return translated, failed, ""
+    try:
+        return deepl.translate_lines(lines, deepl_key, source, target, on_progress=on_progress), 0, ""
+    except deepl.DeepLError as e:
+        print(Fore.YELLOW + f"{e} The other lines are translated with Google." + Style.RESET_ALL)
+        done = e.done
+        remaining = [line for line in lines if line not in done]
+        translated, failed = translate_lines(remaining, make_google, on_progress=on_progress)
+        done.update(zip(remaining, translated))
+        note = f"\n\nDeepL stopped: {e}\n{len(remaining)} line(s) were translated with Google."
+        return [done[line] for line in lines], failed, note
+
+
 def run_subtitle_translation():
     """
     Orchestrates the subtitle translation workflow:
@@ -118,7 +144,6 @@ def run_subtitle_translation():
     from tkinter import ttk
     root = tk.Tk()
     root.title("Subtitle Translation")
-    root.geometry("420x340")
     root.attributes('-topmost', True)
     # Apply modern theme and palette using helper
     style = ttk.Style(root)
@@ -182,15 +207,48 @@ def run_subtitle_translation():
     src_combo.bind("<<ComboboxSelected>>", update_src)
     tgt_combo.bind("<<ComboboxSelected>>", update_tgt)
 
+    # Translation service: DeepL (official API, free key) or Google (no key, but it may refuse the requests)
+    saved_key = deepl.load_key()
+    engine = tk.StringVar(master=root, value="deepl" if saved_key else "google")
+    key_var = tk.StringVar(master=root, value=saved_key)
+    remember_key = tk.BooleanVar(master=root, value=True)
+    engine_frame = create_styled_frame(frame)
+    engine_frame.pack(fill="x", pady=(0, 4))
+    create_styled_label(engine_frame, text="Translation service:").pack(anchor="w")
+    ttk.Radiobutton(engine_frame, text="Google Translate: no key, but it may refuse many requests", variable=engine,
+                    value="google", style='TRadiobutton').pack(anchor="w", padx=10)
+    ttk.Radiobutton(engine_frame, text="DeepL: better translations, free key (500,000 characters a month)",
+                    variable=engine, value="deepl", style='TRadiobutton').pack(anchor="w", padx=10)
+    key_row = create_styled_frame(engine_frame)
+    key_row.pack(anchor="w", padx=30, pady=(2, 0))
+    create_styled_label(key_row, text="DeepL key:").pack(side="left")
+    ttk.Entry(key_row, textvariable=key_var, width=40, show="•").pack(side="left", padx=6)
+    ttk.Checkbutton(engine_frame, text="Remember the key on this computer", variable=remember_key,
+                    style='TCheckbutton').pack(anchor="w", padx=30)
+    create_styled_label(engine_frame, text="Free key: www.deepl.com/pro-api (DeepL API Free). If DeepL stops, "
+                                           "Google translates the rest.", font=("Segoe UI", 9, "italic")).pack(
+        anchor="w", padx=30)
+
     # --- Batch progress window for multiple files ---
     # These will be reset for each batch
     progress_bars = []
     status_labels = []
+    # Read in the Tk thread when the translation starts, used by the worker threads
+    options = {}
 
     def start_translation():
         if not subfile_paths:
             show_message("error", "File Error", "No subtitle file(s) selected.")
             return
+        key = key_var.get().strip() if engine.get() == "deepl" else ""
+        if engine.get() == "deepl" and not key:
+            show_message("error", "DeepL key", "Enter your DeepL key (free on www.deepl.com/pro-api), or choose Google.")
+            return
+        if key and remember_key.get():
+            deepl.save_key(key)
+        # Only the language code, not the display string ('English (en)')
+        options.update(source=src_lang.get().split('(')[-1].rstrip(')').strip(),
+                       target=tgt_lang.get().split('(')[-1].rstrip(')').strip(), key=key)
         ok_btn.config(state="disabled")
         # If only one file, use current window for progress
         if len(subfile_paths) == 1:
@@ -205,15 +263,15 @@ def run_subtitle_translation():
 
         # Remove old widgets
         for widget in frame.winfo_children():
-            if widget not in [ok_btn, browse_frame, lang_frame]:
+            if widget not in [ok_btn, browse_frame, lang_frame, engine_frame]:
                 widget.destroy()
         progress_var = tk.DoubleVar(value=0, master=root)
         progress_bar = ttk.Progressbar(frame, variable=progress_var, maximum=100, length=320, style='TProgressbar')
         progress_bar.pack(pady=(10, 0))
         status_label = create_styled_label(frame, "", style='TLabel', font=("Segoe UI", 10, "italic"))
         status_label.pack(pady=(4, 0))
-        def on_done(failed):
-            messagebox.showinfo("Translation Complete", f"Translation completed!\nOutput saved as:\n{os.path.splitext(subfile)[0]}_translated.srt{failed_note(failed)}")
+        def on_done(report):
+            messagebox.showinfo("Translation Complete", f"Translation completed!\nOutput saved as:\n{os.path.splitext(subfile)[0]}_translated.srt{report}")
             root.destroy()
         def on_error(message):
             status_label.config(text="Error")
@@ -250,9 +308,9 @@ def run_subtitle_translation():
                    for i in range(len(subfile_paths))):
                 batch_win.destroy()
                 root.destroy()
-        def on_file_done(idx, subfile, failed):
+        def on_file_done(idx, subfile, report):
             status_labels[idx].config(text="Done!")
-            messagebox.showinfo("Translation Complete", f"Translation completed!\nOutput saved as:\n{os.path.splitext(subfile)[0]}_translated.srt{failed_note(failed)}")
+            messagebox.showinfo("Translation Complete", f"Translation completed!\nOutput saved as:\n{os.path.splitext(subfile)[0]}_translated.srt{report}")
             close_if_all_finished()
         def on_file_error(idx, subfile, message):
             status_labels[idx].config(text=f"Error: {message.splitlines()[0]}")
@@ -261,7 +319,7 @@ def run_subtitle_translation():
         for idx, subfile in enumerate(subfile_paths):
             threading.Thread(target=translate_file, args=(
                 subfile, progress_bars[idx][0], status_labels[idx],
-                lambda failed, idx=idx, subfile=subfile: on_file_done(idx, subfile, failed),
+                lambda report, idx=idx, subfile=subfile: on_file_done(idx, subfile, report),
                 lambda message, idx=idx, subfile=subfile: on_file_error(idx, subfile, message)
             ), daemon=True).start()
 
@@ -273,34 +331,29 @@ def run_subtitle_translation():
     def translate_file(subfile, progress_var, status_label, on_done, on_error):
         """
         Translate one subtitle file in a worker thread. Tk is only touched through root.after:
-        on_done(number of lines left untranslated) or on_error(message) is called at the end.
+        on_done(report for the user) or on_error(message) is called at the end.
         """
         try:
-            failed = translate_subtitles(subfile, progress_var, status_label)
+            failed, note = translate_subtitles(subfile, progress_var, status_label)
         except Exception as e:  # a dead thread would leave the progress window stuck
             print(Fore.RED + f"Translation of {subfile} failed: {e}" + Style.RESET_ALL)
             root.after(0, on_error, str(e) or type(e).__name__)
             return
-        root.after(0, on_done, failed)
+        root.after(0, on_done, failed_note(failed) + note)
 
     def translate_subtitles(subfile, progress_var, status_label):
-        # Always use only the language code for GoogleTranslator
-        source = src_lang.get()
-        target = tgt_lang.get()
-        # Defensive: if value is like 'English (en)', extract code
-        if '(' in source and ')' in source:
-            source = source.split('(')[-1].split(')')[0].strip()
-        if '(' in target and ')' in target:
-            target = target.split('(')[-1].split(')')[0].strip()
+        """Translate one file (worker thread). Returns (lines kept untranslated, note for the user)."""
+        source, target, key = options["source"], options["target"], options["key"]
         print(Fore.GREEN + f"Selected subtitle file for translation: {subfile}" + Style.RESET_ALL)
-        print(Fore.YELLOW + f"Translating from {source} to {target}" + Style.RESET_ALL)
+        print(Fore.YELLOW + f"Translating from {source} to {target} with {'DeepL' if key else 'Google'}" + Style.RESET_ALL)
         text, encoding = read_subtitle_text(subfile)
         if encoding != "utf-8-sig":
             print(Fore.YELLOW + f"{os.path.basename(subfile)} is not UTF-8, read as {encoding}" + Style.RESET_ALL)
         subs = pysrt.from_string(text)
         if not subs:
             raise ValueError("No subtitle found: is it a valid SubRip (.srt) file?")
-        GoogleTranslator(source=source, target=target)  # reports an unsupported language before starting
+        if not key:
+            GoogleTranslator(source=source, target=target)  # reports an unsupported language before starting
         total = len(subs)
         completed = [0]
         start_time = time.time()
@@ -316,15 +369,12 @@ def run_subtitle_translation():
                 print(f"[{os.path.basename(subfile)}] {completed[0]}/{total} - ETA: {mins:02d}:{secs:02d}", end='\r')
             else:
                 print(f"[{os.path.basename(subfile)}] 100% - Done!{' '*20}")
-        translated, failed = translate_lines(
-            [sub.text for sub in subs],
-            lambda: GoogleTranslator(source=source, target=target),
-            on_progress=lambda count: root.after(0, update, count),
-        )
+        translated, failed, note = translate_texts([sub.text for sub in subs], source, target, key,
+                                                   on_progress=lambda count: root.after(0, update, count))
         for sub, new_text in zip(subs, translated):
             sub.text = new_text
         subs.save(f"{os.path.splitext(subfile)[0]}_translated.srt", encoding='utf-8')
-        return failed
+        return failed, note
 
     root.mainloop()
     try:

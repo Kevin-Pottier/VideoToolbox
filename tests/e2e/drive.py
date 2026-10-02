@@ -71,6 +71,20 @@ if scenario.get("fake_google"):
             return f"[{self.target}] {text}"
     gui_subtitle.GoogleTranslator = FakeTranslator
 
+# The DeepL key is never saved in the profile of the user during the battery
+import deepl  # noqa: E402
+deepl.KEY_FILE = os.path.join(scenario["workdir"], "deepl_key.txt")
+if scenario.get("fake_deepl"):
+    # Stand-in for the DeepL API: "[deepl] " + the text; "quota": the quota is used up after the first batch
+    batches = []
+
+    def fake_batch(texts, key, source, target, url=None, sleep=None):
+        batches.append(len(texts))
+        if scenario["fake_deepl"] == "quota" and len(batches) > 1:
+            raise deepl.DeepLError(deepl.ERRORS[456])
+        return [f"[deepl] {text}" for text in texts]
+    deepl.translate_batch = fake_batch
+
 plan = list(scenario["plan"])
 
 

@@ -100,3 +100,46 @@ def test_progress_counts_every_line():
     done = []
     translate_lines(["a", "b", "a", "c"], FakeTranslator, on_progress=done.append)
     assert sum(done) == 4
+
+
+class Google:
+    """Stand-in for GoogleTranslator: "[fr] " + the text, the texts it was given are recorded."""
+    texts = []
+
+    def translate(self, text):
+        Google.texts.append(text)
+        return f"[fr] {text}"
+
+
+@pytest.fixture
+def google():
+    Google.texts = []
+    return Google
+
+
+def test_with_a_deepl_key_deepl_translates_and_google_is_not_called(monkeypatch, google):
+    import deepl
+    from gui_subtitle import translate_texts
+    monkeypatch.setattr(deepl, "translate_lines",
+                        lambda lines, key, source, target, on_progress=None: [f"[deepl] {line}" for line in lines])
+    assert translate_texts(["Hello.", "Bye."], "en", "fr", "key:fx", make_google=google) == (
+        ["[deepl] Hello.", "[deepl] Bye."], 0, "")
+    assert google.texts == []
+
+
+def test_google_finishes_what_deepl_could_not_translate(monkeypatch, google):
+    import deepl
+    from gui_subtitle import translate_texts
+
+    def quota_used_up(lines, key, source, target, on_progress=None):
+        raise deepl.DeepLError(deepl.ERRORS[456], done={"Hello.": "[deepl] Hello."})
+    monkeypatch.setattr(deepl, "translate_lines", quota_used_up)
+    translated, failed, note = translate_texts(["Hello.", "Bye.", "Bye."], "en", "fr", "key:fx", make_google=google)
+    assert translated == ["[deepl] Hello.", "[fr] Bye.", "[fr] Bye."] and failed == 0
+    assert google.texts == ["Bye."]  # only the rest, identical lines once
+    assert "quota of the month is used up" in note and "2 line(s) were translated with Google" in note
+
+
+def test_without_key_google_translates(google):
+    from gui_subtitle import translate_texts
+    assert translate_texts(["Hello."], "en", "fr", "", make_google=google) == (["[fr] Hello."], 0, "")

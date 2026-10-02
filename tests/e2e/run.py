@@ -67,13 +67,19 @@ SCENARIOS = {
     "compress-no-file-chosen": dict(inputs=[], videos=[], plan=menu("Video Compression")),
     # ---- Subtitle translation
     "translate-film-en-fr": dict(inputs=["film.en.srt"], subtitles=["film.en.srt"], fake_google=True,
-        plan=menu("Subtitle Translation", ["Browse Subtitles", "OK"])),
+        plan=menu("Subtitle Translation", ["Google Translate", "Browse Subtitles", "OK"])),
     "translate-batch-2-files": dict(inputs=["film.en.srt", "movie.en.srt"], subtitles=["film.en.srt", "movie.en.srt"],
-        fake_google=True, plan=menu("Subtitle Translation", ["Browse Subtitles", "OK"])),
+        fake_google=True, plan=menu("Subtitle Translation", ["Google Translate", "Browse Subtitles", "OK"])),
     "translate-real-google": dict(inputs=["film.en.srt"], subtitles=["film.en.srt"],
-        plan=menu("Subtitle Translation", ["Browse Subtitles", "OK", "wait:Error"])),
+        plan=menu("Subtitle Translation", ["Google Translate", "Browse Subtitles", "OK", "wait:Error"])),
     "translate-not-a-subtitle": dict(inputs=["cockatoo.mp4"], subtitles=["cockatoo.mp4"],
-        plan=menu("Subtitle Translation", ["Browse Subtitles", "OK", "wait:Error"])),
+        plan=menu("Subtitle Translation", ["Google Translate", "Browse Subtitles", "OK", "wait:Error"])),
+    # DeepL (stand-in): the key of the environment is filled in and DeepL is chosen
+    "translate-deepl": dict(inputs=["film.en.srt"], subtitles=["film.en.srt"], fake_deepl="ok",
+        env={"DEEPL_API_KEY": "battery-key:fx"}, plan=menu("Subtitle Translation", ["Browse Subtitles", "OK"])),
+    "translate-deepl-quota-then-google": dict(inputs=["movie.en.srt"], subtitles=["movie.en.srt"], fake_deepl="quota",
+        fake_google=True, env={"DEEPL_API_KEY": "battery-key:fx"},
+        plan=menu("Subtitle Translation", ["Browse Subtitles", "OK"])),
     # ---- Upscaling with the real Real-ESRGAN
     "upscale-anime-720p-x264": dict(inputs=["megamind_2s.mkv"], videos=["megamind_2s.mkv"], outdir="out", upscale=True,
         plan=menu("Upscale video", ["720p"], ["Animation", "OK"], [X264, "OK"])),
@@ -276,6 +282,24 @@ def check(name, sc, d, result, new):
             add("same entries and timings", [(s.start, s.end) for s in before] == [(s.start, s.end) for s in after])
             french = sum(bool(re.search(r"\b(le|la|les|un|une|des|du|de|est|nous|vous)\b", s.text, re.I)) for s in after)
             add("French text", french >= 0.7 * len(after), f"{french}/{len(after)} lines, e.g. {after[1].text!r}")
+    elif name.startswith("translate-deepl"):
+        no_errors()
+        import pysrt
+        subtitle = sc["subtitles"][0]
+        out = output(re.escape(os.path.splitext(subtitle)[0]) + r"_translated\.srt$")
+        if out:
+            before, after = pysrt.open(os.path.join(d, subtitle)), pysrt.open(out)
+            by_deepl = sum(b.text == f"[deepl] {a.text}" for a, b in zip(before, after))
+            by_google = sum(b.text == f"[fr] {a.text}" for a, b in zip(before, after))
+            add("same entries and timings", [(s.start, s.end) for s in before] == [(s.start, s.end) for s in after])
+            infos = [e[2] for e in result["events"] if e[0] == "showinfo"]
+            if name == "translate-deepl":
+                add("every line translated by DeepL", by_deepl == len(before), f"{by_deepl}/{len(before)}")
+            else:
+                add("first batch by DeepL, the rest by Google", by_deepl == 50 and by_google == len(before) - 50,
+                    f"DeepL {by_deepl}, Google {by_google} of {len(before)}")
+                add("the user is told", infos and "translated with Google" in infos[0], infos[0] if infos else "")
+            add("the key is not saved in the profile of the user", os.path.exists(os.path.join(d, "deepl_key.txt")))
     elif name.startswith("translate-") and name != "translate-not-a-subtitle":
         no_errors()
         import pysrt
@@ -390,9 +414,12 @@ def run_scenario(name, sc, inputs):
         json.dump(scenario, f)
     with open(os.path.join(d, "log.txt"), "w", encoding="utf-8") as log:
         try:
-            # UTF-8 output: redirected to a file, Python on Windows would write cp1252 and fail on the emojis
+            # UTF-8 output: redirected to a file, Python on Windows would write cp1252 and fail on the emojis.
+            # No DeepL key of the user: only the scenarios that give one use DeepL
+            env = {name: value for name, value in os.environ.items() if name != "DEEPL_API_KEY"}
+            env.update(PYTHONIOENCODING="utf-8", **sc.get("env", {}))
             subprocess.run(driver_command(scenario_file), stdout=log, stderr=subprocess.STDOUT,
-                           env=dict(os.environ, PYTHONIOENCODING="utf-8"), timeout=3600 if sc.get("upscale") else 900)
+                           env=env, timeout=3600 if sc.get("upscale") else 900)
         except subprocess.TimeoutExpired:
             pass
     try:
