@@ -39,12 +39,18 @@ jobs:
           python-version: ${{ matrix.python }}
           cache: pip
           cache-dependency-path: requirements*.txt
-      - name: Install FFmpeg (Linux)
+      - name: Install FFmpeg and a virtual display (Linux)
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg xvfb
       - name: Install FFmpeg (Windows)
         if: runner.os == 'Windows'
         run: choco install ffmpeg --no-progress -y
       - run: pip install -r requirements-dev.txt
-      # -rs lists the skipped tests, e.g. the integration tests when FFmpeg is missing
-      - run: python -m pytest -rs
+      # -rs lists the skipped tests, e.g. the integration tests when FFmpeg is missing; the window tests
+      # (test_gui_windows.py) need a display: a virtual one on Linux
+      - name: Tests (Linux)
+        if: runner.os == 'Linux'
+        run: xvfb-run -a python -m pytest -rs
+      - name: Tests (Windows)
+        if: runner.os == 'Windows'
+        run: python -m pytest -rs

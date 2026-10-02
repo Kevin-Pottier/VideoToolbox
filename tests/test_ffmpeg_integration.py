@@ -7,6 +7,7 @@ import time
 
 import pytest
 
+import ffmpeg_progress
 from helpers import (count_frames, lavfi_audio, lavfi_video, probe, requires_ffmpeg, run_ffmpeg, streams_of_type,
                      subtitle_text)
 
@@ -60,7 +61,7 @@ def test_audio_conversion_keeps_every_track_with_french_first(tmp_path):
                "-disposition:a:3", "0", "-disposition:a:4", "visual_impaired",
                str(src))
 
-    out, order = run_audio_conversion(str(src), gui_progress=noop)
+    out, order = run_audio_conversion(str(src), progress=noop)
 
     assert out == str(tmp_path / "multi_aac.mkv")
     audio = streams_of_type(out, "audio")
@@ -101,7 +102,7 @@ def test_burn_subtitles_with_an_awkward_file_name(movie_mkv, awkward_subtitle):
 
 def test_compression_with_soft_subtitles_in_mkv(movie_mkv, awkward_subtitle):
     from compression import run_compression
-    run_compression(movie_mkv, "soft", awkward_subtitle, "mkv", 0.002, gui_progress=noop)
+    run_compression(movie_mkv, "soft", awkward_subtitle, "mkv", 0.002, progress=noop)
 
     out = movie_mkv.replace(".mkv", "_compressed.mkv")
     subtitles = streams_of_type(out, "subtitle")
@@ -128,7 +129,7 @@ def bilingual_mkv(tmp_path):
 def test_compression_keeps_every_audio_track_with_french_first(bilingual_mkv, ext, target_gb, encoded):
     # Encoded (target smaller than the file) or copied, without subtitle option: the French track used to be dropped
     import compression
-    compression.run_compression(bilingual_mkv, "none", None, ext, target_gb, gui_progress=noop)
+    compression.run_compression(bilingual_mkv, "none", None, ext, target_gb, progress=noop)
 
     out = bilingual_mkv.replace(".mkv", f"_compressed.{ext}")
     audio = streams_of_type(out, "audio")
@@ -140,13 +141,13 @@ def test_compression_keeps_every_audio_track_with_french_first(bilingual_mkv, ex
 def test_two_pass_compression_of_an_mkv_to_mp4_hits_the_target_size(tmp_path, monkeypatch):
     # AAC in MKV starts before 0: in MP4 the second pass would duplicate a frame without passthrough timestamps
     import compression
-    monkeypatch.setattr(compression, "STALL_TIMEOUT", 60)  # fail fast instead of hanging if x264 gets stuck
+    monkeypatch.setattr(ffmpeg_progress, "STALL_TIMEOUT", 60)  # fail fast instead of hanging if x264 gets stuck
     src = tmp_path / "noisy.mkv"
     run_ffmpeg("-f", "lavfi", "-i", "testsrc2=size=320x180:rate=25:duration=6,noise=alls=30:allf=t", *lavfi_audio(duration=6),
                "-c:v", "libx264", "-crf", "10", "-c:a", "aac", str(src))
     target_gb = 0.00085  # about 1000 kbps of video
 
-    compression.run_compression(str(src), "none", None, "mp4", target_gb, gui_progress=noop)
+    compression.run_compression(str(src), "none", None, "mp4", target_gb, progress=noop)
 
     out = tmp_path / "noisy_compressed.mp4"
     assert count_frames(out) == count_frames(src)  # a complete video, not the leftover of a failed pass
@@ -161,7 +162,7 @@ def test_failed_compression_leaves_no_output(movie_mkv, monkeypatch):
     output = movie_mkv.replace(".mkv", "_compressed.mp4")
     open(output, "wb").close()  # as if ffmpeg had started writing it
     with pytest.raises(compression.CompressionError, match="missing input.mkv"):
-        compression.run_compression(movie_mkv, "none", None, "mp4", 0.01, gui_progress=noop)
+        compression.run_compression(movie_mkv, "none", None, "mp4", 0.01, progress=noop)
     assert not os.path.exists(output)
 
 
@@ -169,7 +170,7 @@ def test_compression_aborts_when_the_target_size_is_too_small(movie_mkv):
     # The reason reaches the user (it used to be printed in the console only), with the smallest possible size
     from compression import CompressionError, run_compression
     with pytest.raises(CompressionError, match=r"(?s)Target size too small: only 0 kbps.*smallest size for this video is 0\.001 GB"):
-        run_compression(movie_mkv, "none", None, "mp4", 0.00001, gui_progress=noop)
+        run_compression(movie_mkv, "none", None, "mp4", 0.00001, progress=noop)
     assert not os.path.exists(movie_mkv.replace(".mkv", "_compressed.mp4"))
 
 
@@ -296,13 +297,13 @@ def test_compression_with_the_other_cpu_encoders(tmp_path, monkeypatch, encoder_
     import encoders
     if encoder_name not in encoders._built_encoders():
         pytest.skip(f"{encoder_name} is not in this FFmpeg build")
-    monkeypatch.setattr(compression, "STALL_TIMEOUT", 60)
+    monkeypatch.setattr(ffmpeg_progress, "STALL_TIMEOUT", 60)
     src = tmp_path / "noisy.mkv"
     run_ffmpeg("-f", "lavfi", "-i", "testsrc2=size=320x180:rate=25:duration=4,noise=alls=30:allf=t", *lavfi_audio(duration=4),
                "-c:v", "libx264", "-crf", "10", "-c:a", "aac", str(src))
     target_gb = 0.0006
 
-    compression.run_compression(str(src), "none", None, "mp4", target_gb, gui_progress=noop,
+    compression.run_compression(str(src), "none", None, "mp4", target_gb, progress=noop,
                                 encoder=encoders.BY_NAME[encoder_name])
 
     out = tmp_path / "noisy_compressed.mp4"
@@ -315,7 +316,7 @@ def test_compression_with_the_other_cpu_encoders(tmp_path, monkeypatch, encoder_
 
 def test_a_file_already_under_the_target_size_is_copied(movie_mkv):
     import compression
-    compression.run_compression(movie_mkv, "none", None, "mkv", 0.01, gui_progress=noop)
+    compression.run_compression(movie_mkv, "none", None, "mkv", 0.01, progress=noop)
     out = movie_mkv.replace(".mkv", "_compressed.mkv")
     assert stream_md5(out, "0:v") == stream_md5(movie_mkv, "0:v")  # not re-encoded
     assert [s["codec_name"] for s in streams_of_type(out, "subtitle")] == ["subrip"]
@@ -330,7 +331,7 @@ def test_copy_falls_back_to_encoding_when_the_container_refuses_a_codec(tmp_path
     build = compression.build_encode_commands
     monkeypatch.setattr(compression, "build_encode_commands",
                         lambda *args, **kwargs: bitrates.append(args[3]) or build(*args, **kwargs))
-    compression.run_compression(str(src), "none", None, "mp4", 0.01, gui_progress=noop)
+    compression.run_compression(str(src), "none", None, "mp4", 0.01, progress=noop)
     out = tmp_path / "wma_compressed.mp4"
     assert [s["codec_name"] for s in streams_of_type(out, "audio")] == ["aac"]
     assert count_frames(out) == count_frames(src)
@@ -360,7 +361,7 @@ def test_avi_streams_are_copied_into_mkv(xvid_avi, tmp_path, awkward_subtitle):
     subprocess.run(audio_tracks.build_ffmpeg_command(xvid_avi, tracks, mapping), check=True, capture_output=True)
     assert count_frames(tracks) == count_frames(xvid_avi)
 
-    out = compression.run_compression(xvid_avi, "none", None, "mkv", 0.01, gui_progress=noop)
+    out = compression.run_compression(xvid_avi, "none", None, "mkv", 0.01, progress=noop)
     assert stream_md5(out, "0:v") == stream_md5(xvid_avi, "0:v")  # copied, not re-encoded
 
 
@@ -369,9 +370,10 @@ def test_a_failed_subtitle_addition_leaves_no_output(movie_mkv, awkward_subtitle
 
     def failing_ffmpeg(cmd, *args):
         open(cmd[-2], "wb").close()  # as if ffmpeg had started writing the output (before "-y")
-        return 1
-    monkeypatch.setattr(gui_add_subtitles, "_run_with_progress", failing_ffmpeg)
-    assert gui_add_subtitles.add_subtitles_to_video(movie_mkv, "soft", awkward_subtitle) is None
+        raise ffmpeg_progress.FFmpegError("Invalid data found when processing input")
+    monkeypatch.setattr(gui_add_subtitles, "run_ffmpeg", failing_ffmpeg)
+    with pytest.raises(gui_add_subtitles.SubtitleError, match="Invalid data"):
+        gui_add_subtitles.add_subtitles_to_video(movie_mkv, "soft", awkward_subtitle)
     assert not os.path.exists(movie_mkv.replace(".mkv", "_with_subtitles.mkv"))
 
 
@@ -464,7 +466,7 @@ def hd_surround(tmp_path):
 def test_compression_settings_resolution_speed_and_surround(hd_surround):
     import compression
     settings = compression.CompressionSettings(speed="fast", max_height=480, audio_kbps=96, keep_surround=True)
-    out = compression.run_compression(hd_surround, "none", None, "mp4", 0.0004, gui_progress=noop, settings=settings)
+    out = compression.run_compression(hd_surround, "none", None, "mp4", 0.0004, progress=noop, settings=settings)
 
     video = streams_of_type(out, "video")[0]
     assert (video["width"], video["height"]) == (854, 480)
@@ -479,7 +481,7 @@ def test_a_small_file_reduced_in_resolution_is_encoded_but_not_bigger(hd_surroun
     # of the source at most (not the whole budget, about 40 Mbps here)
     import compression
     settings = compression.CompressionSettings(max_height=480, audio_kbps=96)
-    out = compression.run_compression(hd_surround, "none", None, "mkv", 0.01, gui_progress=noop, settings=settings)
+    out = compression.run_compression(hd_surround, "none", None, "mkv", 0.01, progress=noop, settings=settings)
 
     assert streams_of_type(out, "video")[0]["height"] == 480
     assert streams_of_type(out, "audio")[0]["channels"] == 2  # stereo by default
@@ -505,7 +507,7 @@ def test_audio_conversion_keeps_the_surround(tmp_path, codec, source_layout, cha
     run_ffmpeg(*lavfi_video(), "-f", "lavfi", "-i", f"anoisesrc=d=1:amplitude=0.1,aformat=channel_layouts={source_layout}",
                "-c:v", "libx264", "-c:a", "flac", str(src))
 
-    out, _ = run_audio_conversion(str(src), AudioSettings(codec, 128, keep_surround=True), gui_progress=noop)
+    out, _ = run_audio_conversion(str(src), AudioSettings(codec, 128, keep_surround=True), progress=noop)
 
     [audio] = streams_of_type(out, "audio")
     assert (audio["codec_name"], audio["channels"], audio["channel_layout"]) == (codec, channels, layout)
@@ -520,7 +522,7 @@ def test_audio_conversion_of_an_mp4_to_flac_goes_to_mkv_with_its_subtitles(tmp_p
     run_ffmpeg(*lavfi_video(), *lavfi_audio(), "-i", str(tmp_path / "en.srt"), "-map", "0", "-map", "1", "-map", "2",
                "-c:v", "libx264", "-c:a", "aac", "-c:s", "mov_text", str(src))
 
-    out, _ = run_audio_conversion(str(src), AudioSettings("flac"), gui_progress=noop)
+    out, _ = run_audio_conversion(str(src), AudioSettings("flac"), progress=noop)
 
     assert out == str(tmp_path / "film_flac.mkv")
     assert [s["codec_name"] for s in streams_of_type(out, "audio")] == ["flac"]
@@ -530,7 +532,7 @@ def test_audio_conversion_of_an_mp4_to_flac_goes_to_mkv_with_its_subtitles(tmp_p
 def test_audio_conversion_of_a_divx_avi_with_ac3(xvid_avi):
     # The case of the Megamind trailer: AC3 in a DivX AVI, to AAC in MKV, the video copied
     from audio_conversion import run_audio_conversion
-    out, _ = run_audio_conversion(xvid_avi, gui_progress=noop)
+    out, _ = run_audio_conversion(xvid_avi, progress=noop)
     assert out.endswith("divx_aac.mkv")
     assert [s["codec_name"] for s in streams_of_type(out, "audio")] == ["aac"]
     assert stream_md5(out, "0:v") == stream_md5(xvid_avi, "0:v")
@@ -545,7 +547,7 @@ def test_compression_keeps_the_original_audio_and_counts_its_real_size(bilingual
                         lambda size, duration, audio_bps, margin: budgets.append(audio_bps) or compute(size, duration,
                                                                                                     audio_bps, margin))
     settings = compression.CompressionSettings(audio_codec="copy")
-    out = compression.run_compression(bilingual_mkv, "none", None, "mkv", 0.0003, gui_progress=noop, settings=settings)
+    out = compression.run_compression(bilingual_mkv, "none", None, "mkv", 0.0003, progress=noop, settings=settings)
 
     for index in (0, 1):  # French first: the tracks are swapped, not re-encoded
         assert stream_md5(out, f"0:a:{index}") == stream_md5(bilingual_mkv, f"0:a:{1 - index}")
@@ -557,7 +559,7 @@ def test_audio_that_mp4_cannot_store_is_refused_before_encoding(tmp_path):
     src = tmp_path / "dts.mkv"
     run_ffmpeg(*lavfi_video(), *lavfi_audio(), "-c:v", "libx264", "-c:a", "dca", "-strict", "-2", str(src))
     with pytest.raises(compression.CompressionError, match="DTS audio cannot be copied into MP4"):
-        compression.run_compression(str(src), "none", None, "mp4", 0.001, gui_progress=noop,
+        compression.run_compression(str(src), "none", None, "mp4", 0.001, progress=noop,
                                     settings=compression.CompressionSettings(audio_codec="copy"))
     assert not os.path.exists(tmp_path / "dts_compressed.mp4")
 
@@ -566,7 +568,7 @@ def test_compression_with_opus_audio(bilingual_mkv):
     import compression
     requires_audio_encoder("opus")
     settings = compression.CompressionSettings(audio_codec="opus", audio_kbps=96)
-    out = compression.run_compression(bilingual_mkv, "none", None, "mp4", 0.0003, gui_progress=noop, settings=settings)
+    out = compression.run_compression(bilingual_mkv, "none", None, "mp4", 0.0003, progress=noop, settings=settings)
     assert [s["codec_name"] for s in streams_of_type(out, "audio")] == ["opus", "opus"]
 
 
@@ -594,7 +596,7 @@ def test_hdr10_kept_by_x265_with_its_metadata(hdr10_clip):
     import encoders
     import hdr
     out = compression.run_compression(hdr10_clip, "none", None, "mkv", os.path.getsize(hdr10_clip) / 2 / 1024 ** 3,
-                                      gui_progress=noop, encoder=encoders.BY_NAME["libx265"])
+                                      progress=noop, encoder=encoders.BY_NAME["libx265"])
     assert video_colors(out) == ("hevc", "yuv420p10le", "smpte2084", "bt2020")
     assert hdr.read_static_metadata(out) == hdr.read_static_metadata(hdr10_clip)
 
@@ -606,7 +608,7 @@ def test_hdr10_converted_to_sdr_for_h264(hdr10_clip):
     if not hdr.has_zscale():
         pytest.skip("this FFmpeg build has no zscale filter")
     out = compression.run_compression(hdr10_clip, "none", None, "mkv", os.path.getsize(hdr10_clip) / 2 / 1024 ** 3,
-                                      gui_progress=noop)
+                                      progress=noop)
     assert video_colors(out) == ("h264", "yuv420p", "bt709", "bt709")
 
 
@@ -637,3 +639,25 @@ def test_no_speed_when_realesrgan_fails(tmp_path, fake_realesrgan, monkeypatch):
     monkeypatch.setenv("FAKE_REALESRGAN_FAIL", "1")
     src = anamorphic_clip(tmp_path)
     assert gui_upscale.measure_speed(str(src), gui_upscale.probe_video(str(src)), gui_upscale.MODELS[0], 4) is None
+
+
+@pytest.mark.parametrize("name", ["libx264", "libx265"])
+def test_constant_quality_compression(bilingual_mkv, name):
+    import compression
+    import encoders
+    settings = compression.CompressionSettings(quality="small", speed="fast")
+    out = compression.run_compression(bilingual_mkv, "none", None, "mkv", None, progress=noop,
+                                      encoder=encoders.BY_NAME[name], settings=settings)
+    assert count_frames(out) == count_frames(bilingual_mkv)
+    assert [s["codec_name"] for s in streams_of_type(out, "video")] == [{"libx264": "h264", "libx265": "hevc"}[name]]
+    assert [s["tags"]["language"] for s in streams_of_type(out, "audio")] == ["fre", "eng"]
+
+
+def test_a_lower_quality_makes_a_smaller_file(bilingual_mkv):
+    import compression
+    sizes = {}
+    for quality in ("high", "small"):
+        out = compression.run_compression(bilingual_mkv, "none", None, "mkv", None, progress=noop,
+                                          settings=compression.CompressionSettings(quality=quality, speed="fast"))
+        sizes[quality] = os.path.getsize(out)
+    assert sizes["small"] < sizes["high"] * 0.8

@@ -137,7 +137,7 @@ def test_dolby_vision_profile_5_is_refused(monkeypatch, big_file):
     monkeypatch.setattr(compression, "ffprobe_streams", lambda path: MediaFileInfo(path, video_tracks=[video],
                                                                                    duration=10.0))
     with pytest.raises(compression.CompressionError, match="Dolby Vision profile 5"):
-        compression.run_compression(big_file, "none", None, "mkv", 0.001, gui_progress=lambda *a: None,
+        compression.run_compression(big_file, "none", None, "mkv", 0.001, progress=lambda *a: None,
                                     encoder=BY_NAME["libx265"])
 
 
@@ -146,4 +146,4 @@ def test_sdr_conversion_without_zscale_is_explained(monkeypatch, big_file):
                                                                                    duration=10.0))
     monkeypatch.setattr(hdr, "has_zscale", lambda: False)
     with pytest.raises(compression.CompressionError, match="zscale"):
-        compression.run_compression(big_file, "none", None, "mkv", 0.001, gui_progress=lambda *a: None)
+        compression.run_compression(big_file, "none", None, "mkv", 0.001, progress=lambda *a: None)

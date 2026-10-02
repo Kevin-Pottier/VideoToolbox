@@ -10,33 +10,20 @@ next to the originals.
 """
 
 import os
-import queue
-import threading
 import tkinter as tk
-from tkinter import filedialog, messagebox
 from tkinter import ttk
 from tkinter import scrolledtext
-from typing import Callable, Optional
 
 import audio_codecs
 from audio_codecs import AudioSettings
 from audio_conversion import run_audio_conversion
-from gui_helpers import apply_modern_theme, create_styled_frame, create_styled_label, create_styled_button
+from gui_helpers import (ask_video_files, create_styled_button, create_styled_frame, create_styled_label, new_window,
+                         run_jobs, show_message, show_results)
 
 
 def run_audio_conversion_gui() -> None:
-    # Root window setup
-    root = tk.Tk()
-    root.title("Audio conversion")
-    root.attributes('-topmost', True)
-    style = ttk.Style(root)
-    apply_modern_theme(root, style)
-
+    root, frame = new_window("Audio conversion")
     files_to_process: list[str] = []
-
-    # Containers
-    frame = create_styled_frame(root)
-    frame.pack(fill="both", expand=True, padx=10, pady=10)
 
     create_styled_label(frame, text="Audio conversion (the video is not re-encoded)", style='Title.TLabel').pack(
         pady=(0, 8))
@@ -99,13 +86,7 @@ def run_audio_conversion_gui() -> None:
 
     # Button commands
     def add_files() -> None:
-        root.lift()
-        root.attributes("-topmost", True)
-        filepaths = filedialog.askopenfilenames(
-            title="Choose video file(s)",
-            filetypes=[("Videos", "*.mp4 *.mkv *.avi *.mov *.m4v *.ts *.wmv *.flv"), ("All files", "*.*")]
-        )
-
+        filepaths = ask_video_files()
         if not filepaths:
             return
 
@@ -125,99 +106,35 @@ def run_audio_conversion_gui() -> None:
 
     def convert_files() -> None:
         if not files_to_process:
-            msg_root = tk.Toplevel(root)
-            msg_root.withdraw()
-            messagebox.showerror("File Error", "No video file(s) selected.", parent=msg_root)
-            msg_root.destroy()
+            show_message("error", "File Error", "No video file(s) selected.")
             return
-        # Disable buttons during conversion
-        convert_btn.config(state="disabled")
-        add_btn.config(state="disabled")
-        clear_btn.config(state="disabled")
         settings = AudioSettings(codec_var.get(), kbps_var.get(), surround_var.get())
         append_log(f"Converting to {settings.codec.upper()}"
                    + ("" if audio_codecs.BY_NAME[settings.codec].lossless else f" at {settings.kbps} kbps")
                    + (", channels kept." if settings.keep_surround else ", stereo."))
-        # Create progress window
-        progress_win = tk.Toplevel(root)
-        progress_win.title("Audio Conversion Progress")
-        progress_win.geometry(f"500x{120 + 60 * len(files_to_process)}")
-        apply_modern_theme(progress_win)
-        batch_frame = create_styled_frame(progress_win)
-        batch_frame.pack(fill="both", expand=True, padx=10, pady=10)
-        create_styled_label(batch_frame, text="Audio Conversion Progress", style='Title.TLabel').pack(pady=(0, 8))
-        progress_vars: list[tk.DoubleVar] = []
-        progress_bars: list[ttk.Progressbar] = []
-        status_labels: list[tk.Label] = []
-        for p in files_to_process:
-            filename = os.path.basename(p)
-            create_styled_label(batch_frame, text=filename, anchor="w").pack(anchor="w")
-            pvar = tk.DoubleVar(value=0, master=progress_win)
-            pbar = ttk.Progressbar(batch_frame, variable=pvar, maximum=100, length=420, style='TProgressbar')
-            pbar.pack(pady=(0, 2))
-            slabel = create_styled_label(batch_frame, text="Waiting...", style='TLabel', font=("Segoe UI", 9, "italic"))
-            slabel.pack(anchor="w", pady=(0, 8))
-            progress_vars.append(pvar)
-            progress_bars.append(pbar)
-            status_labels.append(slabel)
+        paths = list(files_to_process)
 
-        # The worker threads never touch Tk: they fill this queue, applied by poll() in the Tk thread
-        events: "queue.Queue[tuple]" = queue.Queue()
-
-        def on_file_done(idx: int, input_path: str, success: bool, error: Optional[Exception] = None,
-                         result: Optional[tuple] = None) -> None:
-            events.put(("done", idx, input_path, success, error, result))
-
-        def finish(idx: int, input_path: str, success: bool, error: Optional[Exception],
-                   result: Optional[tuple]) -> bool:
-            """Show the result of one file; True once every file is finished."""
-            if success:
-                output_file, track_order = result
-                status_labels[idx].config(text="Done!")
+        def convert(index, report, cancel):
+            return run_audio_conversion(paths[index], settings, progress=report, cancel=cancel)
+        # The buttons are disabled meanwhile: the conversion window waits in this callback
+        buttons = (convert_btn, add_btn, clear_btn)
+        for button in buttons:
+            button.state(["disabled"])
+        try:
+            results = run_jobs("Audio conversion", [os.path.basename(path) for path in paths], convert,
+                               done_text=lambda result: os.path.basename(result[0]))
+        finally:
+            for button in buttons:
+                if button.winfo_exists():
+                    button.state(["!disabled"])
+        for result in results:
+            if result.ok:
+                output_file, track_order = result.detail
                 append_log(f"Finished: {os.path.basename(output_file)} (audio tracks: {', '.join(track_order)})")
             else:
-                status_labels[idx].config(text="Error")
-                append_log(f"Error processing {os.path.basename(input_path)}: {error}")
-            return all(status_labels[i].cget("text") in ("Done!", "Error") for i in range(len(files_to_process)))
-
-        def make_progress_callback(idx: int) -> Callable[[float, Optional[int], Optional[int]], None]:
-            def callback(percent: float, mins: Optional[int], secs: Optional[int]) -> None:
-                events.put(("progress", idx, percent, mins, secs))
-            return callback
-
-        def show_progress(idx: int, percent: float, mins: Optional[int], secs: Optional[int]) -> None:
-            progress_vars[idx].set(percent)
-            eta = f"{mins:02d}:{secs:02d}" if mins is not None and secs is not None else "--:--"
-            status_labels[idx].config(text=f"{percent:5.1f}% | ETA: {eta}")
-
-        def poll() -> None:
-            try:
-                while True:
-                    event = events.get_nowait()
-                    if event[0] == "progress":
-                        show_progress(*event[1:])
-                    elif finish(*event[1:]):
-                        # Every file is finished: re‑enable the buttons and close the progress window
-                        convert_btn.config(state="normal")
-                        add_btn.config(state="normal")
-                        clear_btn.config(state="normal")
-                        progress_win.destroy()
-                        return
-            except queue.Empty:
-                pass
-            root.after(200, poll)
-
-        # Launch conversions in parallel (one thread per file)
-        def worker(idx: int, path: str) -> None:
-            try:
-                result = run_audio_conversion(path, settings, gui_progress=make_progress_callback(idx))
-                on_file_done(idx, path, True, result=result)
-            except Exception as e:
-                on_file_done(idx, path, False, e)
-
-        for i, path in enumerate(files_to_process):
-            threading.Thread(target=worker, args=(i, path), daemon=True).start()
-        poll()
+                append_log(f"Error processing {result.name}: {result.detail}")
+        if not all(result.ok for result in results):
+            show_results("Audio conversion", results, lambda result: os.path.basename(result[0]))
 
     # Buttons
     btn_frame = create_styled_frame(frame)
@@ -229,4 +146,4 @@ def run_audio_conversion_gui() -> None:
     clear_btn = create_styled_button(btn_frame, text="Clear List", command=clear_list, width=14)
     clear_btn.pack(side="left", padx=4)
 
-    root.mainloop()
+    root.wait_window()

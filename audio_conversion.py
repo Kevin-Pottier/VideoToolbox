@@ -21,10 +21,6 @@ the others become MKV).
 """
 
 import os
-import re
-import subprocess
-import threading
-import time
 from typing import Callable, Optional
 
 try:
@@ -42,6 +38,7 @@ except ImportError:
 import audio_codecs
 from audio_codecs import AudioSettings
 from audio_tracks import ffprobe_streams, french_default_dispositions, french_first, is_french_track
+from ffmpeg_progress import Cancelled, FFmpegError, console_progress, run_ffmpeg
 from utils import COPY_INPUT_FLAGS
 
 
@@ -91,15 +88,17 @@ def build_conversion_command(input_path: str, output_file: str, media, settings:
 
 
 def run_audio_conversion(file_path: str, settings: AudioSettings = AudioSettings(),
-                         gui_progress: Optional[Callable[[float, Optional[int], Optional[int]], None]] = None):
+                         progress: Optional[Callable[[float], None]] = None, cancel=None):
     """
     Convert the audio tracks of the video file, the video untouched, French tracks first. A progress bar
-    is shown in the terminal unless a gui_progress(percent, mins, secs) callback is given.
+    is shown in the terminal unless a progress(share done, 0 to 1) callback is given; cancel (threading.Event)
+    stops the conversion.
 
     Returns:
         tuple: (path of the output file, labels of the audio tracks in their output order, e.g. "FRE 6ch")
     Raises:
         RuntimeError: if the file cannot be read, has no audio track, or if ffmpeg fails (no output is left).
+        Cancelled: cancel was set (no output is left).
     """
     abs_path = os.path.abspath(file_path)
     output_file = output_path(abs_path, settings)
@@ -118,62 +117,13 @@ def run_audio_conversion(file_path: str, settings: AudioSettings = AudioSettings
     print(Fore.YELLOW + f"\nConverting the audio of: {os.path.basename(file_path)}" + Style.RESET_ALL)
     print("\tAudio tracks: " + ", ".join(track_order) + ("" if has_french else " (no French track found, order kept)"))
     print("\tCommand:", " ".join(ffmpeg_cmd))
-
-    def run_ffmpeg_and_report() -> None:
-        """Execute ffmpeg and report its progress."""
-        # ffmpeg writes UTF-8 (file names): the locale encoding (cp1252 on Windows) could fail on it
-        proc = subprocess.Popen(ffmpeg_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
-                                encoding="utf-8", errors="replace")
-        bar_len = 40
-        start_time = None
-        last_lines = []
-        for line in proc.stderr:  # progress lines end with \r, split like \n
-            last_lines = (last_lines + [line.rstrip()])[-8:]
-            match = re.search(r'time=(\d+):(\d+):(\d+\.\d+)', line)
-            if not (match and duration):
-                continue
-            h, m, s = match.groups()
-            current_time = int(h) * 3600 + int(m) * 60 + float(s)
-            if start_time is None:
-                start_time = time.time()
-            percent = min(100, (current_time / duration) * 100)
-            elapsed = time.time() - start_time
-            if current_time > 0 and percent < 100:
-                mins, secs = divmod(int(elapsed / (percent / 100) - elapsed), 60)
-            else:
-                mins = secs = 0
-            if gui_progress:
-                gui_progress(percent, mins, secs)
-            else:
-                filled_len = int(round(bar_len * percent / 100))
-                bar = '=' * filled_len + '-' * (bar_len - filled_len)
-                print(f'\rConverting audio: [{bar}] {percent:5.1f}% | ETA: {mins:02d}:{secs:02d}', end='', flush=True)
-        proc.wait()
-        if not gui_progress and duration:
-            print(f'\rConverting audio: [{"=" * bar_len}] 100.0% | ETA: 00:00')
-        if proc.returncode == 0:
-            print(Fore.GREEN + f"\n✅ Audio conversion completed. Output: {output_file}" + Style.RESET_ALL)
-        else:
-            if os.path.exists(output_file):
-                os.remove(output_file)  # a failed ffmpeg leaves an unreadable file that looks like a result
-            raise RuntimeError(f"ffmpeg exited with code {proc.returncode}:\n" + "\n".join(last_lines[-3:]))
-
-    if gui_progress:
-        # The GUI runs this function in a worker thread already
-        run_ffmpeg_and_report()
-    else:
-        errors: list[Exception] = []
-
-        def run_in_thread() -> None:
-            try:
-                run_ffmpeg_and_report()
-            except Exception as e:  # re-raised below: an exception does not leave a thread by itself
-                errors.append(e)
-        thread = threading.Thread(target=run_in_thread)
-        thread.start()
-        thread.join()
-        if errors:
-            raise errors[0]
+    try:
+        run_ffmpeg(ffmpeg_cmd, duration, progress or console_progress("Converting audio"), cancel=cancel)
+    except (FFmpegError, Cancelled):
+        if os.path.exists(output_file):
+            os.remove(output_file)  # a failed ffmpeg leaves an unreadable file that looks like a result
+        raise
+    print(Fore.GREEN + f"\n✅ Audio conversion completed. Output: {output_file}" + Style.RESET_ALL)
     return output_file, track_order
 
 

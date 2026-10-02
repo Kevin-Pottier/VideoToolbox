@@ -124,7 +124,8 @@ def test_a_stuck_ffmpeg_is_killed(monkeypatch):
     import time
 
     import compression
-    monkeypatch.setattr(compression, "STALL_TIMEOUT", 1)
+    import ffmpeg_progress
+    monkeypatch.setattr(ffmpeg_progress, "STALL_TIMEOUT", 1)
     silent_command = [sys.executable, "-c", "import time; time.sleep(60)"]
     start = time.time()
     with pytest.raises(compression.CompressionError, match="stopped responding"):
@@ -206,3 +207,27 @@ def test_copy_command_keeps_the_streams_as_they_are():
     assert maps(mp4) == ["0:v:0", "0:2", "0:1", "1:0", "0:3"]
     mkv = build_copy_command("in.mkv", "out.mkv", "mkv", "none", None, FILM)
     assert option(mkv, "-c:s") == "copy" and maps(mkv) == ["0:v:0", "0:2", "0:1", "0:3", "0:4", "0:t?"]
+
+
+def test_constant_quality_is_one_pass_without_bitrate():
+    from compression import build_encode_commands
+    from encoders import BY_NAME
+    settings = CompressionSettings(quality="good", max_height=720)
+    for name, rate in (("libx264", ["-crf", "22"]), ("libx265", ["-crf", "24"])):
+        [(cmd, share)] = build_encode_commands("in.mkv", "out.mkv", "mkv", None, "none", None, "work", FILM,
+                                               "-fps_mode", BY_NAME[name], settings)
+        assert share == 1.0 and "-pass" not in cmd and "-b:v" not in cmd
+        assert cmd[cmd.index(rate[0]):cmd.index(rate[0]) + 2] == rate
+        assert option(cmd, "-vf") == "scale=-2:720:flags=lanczos,format=yuv420p"
+        if name == "libx265":
+            assert option(cmd, "-x265-params") == "log-level=error"  # no pass, no statistics file
+    assert settings.describe(BY_NAME["libx265"]).startswith("constant quality good (24), speed balanced")
+    assert CompressionSettings(quality="high").describe(BY_NAME["h264_amf"]).startswith("constant quality high (bitrate)")
+
+
+def test_output_frames_follow_the_resize():
+    from compression import output_frames
+    movie = MediaFileInfo("in.mkv", video_tracks=[VideoTrackInfo(0, "h264", 1920, 1080, avg_frame_rate="24000/1001")])
+    assert output_frames(movie) == (1920, 1080, pytest.approx(23.976, abs=0.001))
+    assert output_frames(movie, CompressionSettings(max_height=720)) == (1280, 720, pytest.approx(23.976, abs=0.001))
+    assert output_frames(MediaFileInfo("in.mkv", video_tracks=[VideoTrackInfo(0, "h264", 640, 360)])) == (640, 360, 25.0)

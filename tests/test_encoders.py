@@ -79,3 +79,36 @@ def test_available_encoders_lists_working_ones_gpu_first(monkeypatch):
 def test_labels_name_the_codec_and_where_it_runs():
     assert BY_NAME["hevc_nvenc"].label == "HEVC - NVIDIA GPU (hevc_nvenc)"
     assert BY_NAME["libsvtav1"].label == "AV1 - CPU (libsvtav1)"
+
+
+@pytest.mark.parametrize("name, option_name, values", [
+    ("libx264", "-crf", ("18", "22", "26")),
+    ("libx265", "-crf", ("20", "24", "28")),
+    ("libsvtav1", "-crf", ("26", "32", "38")),
+    ("hevc_nvenc", "-cq", ("19", "24", "29")),
+    ("av1_qsv", "-global_quality", ("20", "24", "28")),
+])
+def test_constant_quality_levels(name, option_name, values):
+    args = [encoders.constant_quality_args(BY_NAME[name], quality, 1920, 1080, 24) for quality in encoders.QUALITIES]
+    assert tuple(option(a, option_name) for a in args) == values
+    assert all("-pass" not in a and "-maxrate" not in a for a in args)
+
+
+def test_nvenc_constant_quality_has_no_bitrate_limit():
+    args = encoders.constant_quality_args(BY_NAME["h264_nvenc"], "good", 1920, 1080, 24, speed="quality")
+    assert (option(args, "-rc"), option(args, "-b:v"), option(args, "-preset")) == ("vbr", "0", "p7")
+
+
+@pytest.mark.parametrize("name", ["h264_amf", "hevc_vaapi", "hevc_videotoolbox"])
+def test_encoders_without_a_quality_scale_get_a_bitrate_per_level(name):
+    rates = [int(option(encoders.constant_quality_args(BY_NAME[name], quality, 1920, 1080, 25), "-b:v")[:-1])
+             for quality in encoders.QUALITIES]
+    assert rates[0] > rates[1] > rates[2] > 1000
+    assert encoders.quality_value(BY_NAME[name], "good") is None
+
+
+def test_the_upscaling_quality_is_unchanged():
+    assert encoders.quality_args(BY_NAME["libx264"], 1920, 1080, 24) == [
+        "-c:v", "libx264", "-preset", "medium", "-crf", "18"]
+    assert encoders.quality_args(BY_NAME["libx265"], 1920, 1080, 24)[-4:] == ["-preset", "medium", "-crf", "20"]
+    assert encoders.quality_args(BY_NAME["libsvtav1"], 1920, 1080, 24)[-4:] == ["-preset", "8", "-crf", "26"]

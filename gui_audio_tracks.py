@@ -6,14 +6,14 @@ Integrates with the existing VideoCompress application.
 """
 
 import tkinter as tk
-from tkinter import filedialog, messagebox
+from tkinter import filedialog
 from colorama import Fore, Style
 import os
-import queue
-import threading
 
 # Import reusable GUI helpers
-from gui_helpers import apply_modern_theme, create_styled_frame, create_styled_label, create_styled_button, show_message
+from ffmpeg_progress import Cancelled, FFmpegError, run_ffmpeg
+from gui_helpers import (VIDEO_TYPES, app_root, create_styled_frame, create_styled_label,
+                         create_styled_button, new_window, run_jobs, show_message, show_results)
 
 # Import audio processing logic
 from audio_tracks import (
@@ -23,7 +23,6 @@ from audio_tracks import (
     build_audio_mapping_options,
     build_ffmpeg_command
 )
-import subprocess
 
 
 def run_audio_tracks_gui():
@@ -33,14 +32,7 @@ def run_audio_tracks_gui():
     """
     
     # Step 1: Select video file
-    root = tk.Tk()
-    root.withdraw()
-    root.attributes('-topmost', True)
-    file_path = filedialog.askopenfilename(
-        title="Choose video file",
-        filetypes=[("Videos", "*.mp4 *.mkv *.avi *.mov *.flv *.wmv")]
-    )
-    root.destroy()
+    file_path = filedialog.askopenfilename(parent=app_root(), title="Choose video file", filetypes=VIDEO_TYPES)
     
     if not file_path:
         print(Fore.YELLOW + "No file selected. Cancelled." + Style.RESET_ALL)
@@ -85,31 +77,9 @@ def show_audio_selection_window(file_path: str, media_info: MediaFileInfo):
     """
     from tkinter import ttk
     
-    # Window setup
-    selection_win = tk.Tk()
-    selection_win.title("Audio Track Management")
-    
-    # Calculate window size
+    # Window setup, its height following the number of tracks
     num_tracks = len(media_info.audio_tracks)
-    win_height = min(350 + num_tracks * 45, 650)
-    
-    selection_win.geometry(f"720x{win_height}")
-    selection_win.configure(bg="#23272e")
-    selection_win.attributes('-topmost', True)
-    
-    # Center window
-    selection_win.update_idletasks()
-    w = selection_win.winfo_width()
-    h = win_height
-    x = (selection_win.winfo_screenwidth() // 2) - (w // 2)
-    y = (selection_win.winfo_screenheight() // 2) - (h // 2)
-    selection_win.geometry(f"{w}x{h}+{x}+{y}")
-    
-    apply_modern_theme(selection_win)
-    
-    # Main frame
-    main_frame = create_styled_frame(selection_win)
-    main_frame.pack(fill="both", expand=True, padx=15, pady=10)
+    selection_win, main_frame = new_window("Audio Track Management", f"720x{min(350 + num_tracks * 45, 650)}")
     
     # Header
     create_styled_label(main_frame, "Audio Track Management", style='Title.TLabel').pack(pady=(0, 5))
@@ -160,7 +130,6 @@ def show_audio_selection_window(file_path: str, media_info: MediaFileInfo):
     
     # Custom treeview style
     style = ttk.Style(selection_win)
-    style.theme_use("clam")
     style.configure("Treeview", 
                     background="#1a1d23", 
                     foreground="#f5f6fa",
@@ -306,7 +275,7 @@ def show_audio_selection_window(file_path: str, media_info: MediaFileInfo):
     create_styled_button(btn_frame, "Process", on_process).pack(side="right", padx=5)
     create_styled_button(btn_frame, "Cancel", on_cancel).pack(side="right", padx=5)
     
-    selection_win.mainloop()
+    selection_win.wait_window()
     if choice:
         process_audio_tracks(file_path, media_info, **choice)
 
@@ -378,167 +347,17 @@ def process_audio_tracks(
     print(f"   {' '.join(ffmpeg_cmd)}")
     print()
 
-    if media_info.duration is None:
-        messagebox.showerror("❌ Error", "Unable to determine the media duration.")
-        return
-
-    # Show progress window
-    show_progress_window(file_path, output_file, ffmpeg_cmd, media_info.duration)
-
-
-def show_progress_window(input_file: str, output_file: str, ffmpeg_cmd: list, duration: float):
-    """
-    Show a progress window during FFmpeg processing.
-    
-    Args:
-        input_file: Source file
-        output_file: Destination file
-        ffmpeg_cmd: FFmpeg command to execute
-        duration: Video duration in seconds
-    """
-    from tkinter import ttk
-    import time
-    import re
-    
-    progress_root = tk.Tk()
-    progress_root.title("Processing Audio Tracks")
-    progress_root.geometry("450x180")
-    progress_root.attributes('-topmost', True)
-    progress_root.configure(bg="#23272e")
-    apply_modern_theme(progress_root)
-    
-    frame = create_styled_frame(progress_root)
-    frame.pack(fill="both", expand=True, padx=15, pady=10)
-    
-    create_styled_label(
-        frame,
-        "Processing audio tracks...",
-        style='Title.TLabel'
-    ).pack(pady=(0, 8))
-    
-    create_styled_label(
-        frame,
-        os.path.basename(output_file),
-        style='TLabel'
-    ).pack(pady=(0, 8))
-    
-    progress_var = tk.DoubleVar(value=0, master=progress_root)
-    progress_bar = ttk.Progressbar(
-        frame,
-        variable=progress_var,
-        maximum=100,
-        length=380,
-        style='TProgressbar'
-    )
-    progress_bar.pack(pady=8)
-    
-    percent_label = create_styled_label(frame, "0%", style='TLabel')
-    percent_label.pack()
-    
-    time_label = create_styled_label(
-        frame,
-        "Estimated time left: --:--",
-        style='TLabel',
-        font=("Segoe UI", 10, "italic")
-    )
-    time_label.pack()
-    
-    events = queue.Queue()  # the worker thread never touches Tk: it only fills this queue
-
-    def run_ffmpeg():
-        """Run FFmpeg in background thread; its progress and result go through the events queue."""
-        video_dir = os.path.dirname(input_file) or "."
-        error_output = []
-        
+    def process(index, report, cancel):
         try:
-            # ffmpeg writes UTF-8 (file names): the locale encoding (cp1252 on Windows) could fail on it
-            proc = subprocess.Popen(
-                ffmpeg_cmd,
-                cwd=video_dir,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.PIPE,
-                encoding="utf-8",
-                errors="replace"
-            )
-            
-            start_time = time.time()
-            
-            for line in proc.stderr:  # progress lines end with \r, split like \n
-                # Capture error messages
-                if any(err in line.lower() for err in ["error", "failed", "invalid"]):
-                    error_output.append(line.strip())
-                
-                if "time=" in line:
-                    match = re.search(r'time=(\d+):(\d+):(\d+\.\d+)', line)
-                    if match and duration > 0:
-                        h, m, s = match.groups()
-                        cur_time = int(h) * 3600 + int(m) * 60 + float(s)
-                        percent = min(100, int(cur_time / duration * 100))
-                        
-                        elapsed = time.time() - start_time
-                        if cur_time > 0 and percent < 100:
-                            est_total = elapsed / (cur_time / duration)
-                            remaining = est_total - elapsed
-                            mins, secs = divmod(int(remaining), 60)
-                        else:
-                            mins, secs = None, None
-                        events.put(("progress", percent, mins, secs))
-            
-            proc.wait()
-            
-            if proc.returncode == 0:
-                print(Fore.GREEN + "✅ Processing completed successfully!" + Style.RESET_ALL)
-                events.put(("done", True, f"Audio tracks processed successfully!\n\nOutput: {os.path.basename(output_file)}"))
-            else:
-                if os.path.exists(output_file):
-                    os.remove(output_file)  # a failed ffmpeg leaves an unreadable file that looks like a result
-                error_msg = "\n".join(error_output[-5:]) if error_output else "Unknown error (check console for details)"
-                print(Fore.RED + f"❌ Processing failed with code {proc.returncode}" + Style.RESET_ALL)
-                print(Fore.RED + f"Error: {error_msg}" + Style.RESET_ALL)
-                events.put(("done", False, f"Failed to process audio tracks.\n\nError: {error_msg}\n\nCheck console for full details."))
-                
-        except FileNotFoundError:
-            error_msg = "FFmpeg not found. Please ensure FFmpeg is installed and in your PATH."
-            print(Fore.RED + "❌ " + error_msg + Style.RESET_ALL)
-            events.put(("done", False, error_msg))
-            
-        except Exception as e:
-            print(Fore.RED + f"❌ Exception: {e}" + Style.RESET_ALL)
-            events.put(("done", False, f"An unexpected error occurred:\n{e}"))
-    
-    def poll():
-        """Apply the worker's events in the Tk thread."""
-        try:
-            while True:
-                event = events.get_nowait()
-                if event[0] == "progress":
-                    _, percent, mins, secs = event
-                    progress_var.set(percent)
-                    percent_label.config(text=f"{percent}%")
-                    if mins is not None:
-                        time_label.config(text=f"Estimated time left: {mins:02d}:{secs:02d}")
-                else:
-                    _, ok, message = event
-                    if ok:
-                        progress_var.set(100)
-                        percent_label.config(text="100%")
-                        time_label.config(text="Completed!")
-                        messagebox.showinfo("✅ Success", message, parent=progress_root)
-                    else:
-                        messagebox.showerror("❌ Error", message, parent=progress_root)
-                    # Closed only once the message is acknowledged
-                    progress_root.destroy()
-                    return
-        except queue.Empty:
-            pass
-        progress_root.after(200, poll)
-    
-    # Start processing in background thread
-    thread = threading.Thread(target=run_ffmpeg, daemon=True)
-    thread.start()
-    poll()
-    
-    progress_root.mainloop()
+            # Run in the folder of the video
+            run_ffmpeg(ffmpeg_cmd, media_info.duration, report, cwd=os.path.dirname(file_path) or ".", cancel=cancel)
+        except (FFmpegError, Cancelled):
+            if os.path.exists(output_file):
+                os.remove(output_file)  # a failed ffmpeg leaves an unreadable file that looks like a result
+            raise
+        print(Fore.GREEN + "✅ Processing completed successfully!" + Style.RESET_ALL)
+        return output_file
+    show_results("Audio tracks", run_jobs("Processing audio tracks", [os.path.basename(output_file)], process))
 
 
 # ============================================================================

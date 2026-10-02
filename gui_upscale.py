@@ -14,7 +14,7 @@ from tkinter import filedialog, messagebox, ttk
 from typing import List, Tuple
 
 import encoders
-from gui_helpers import apply_modern_theme, choose_encoder, create_styled_frame, create_styled_label, create_styled_button
+from gui_helpers import app_root, choose_encoder, create_styled_label, create_styled_button, new_window
 from audio_tracks import ffprobe_streams
 
 # Real-ESRGAN is not stored in the repository: `python scripts/fetch_deps.py` downloads it into Tool/
@@ -223,12 +223,7 @@ def estimate_seconds(jobs, model, seconds_per_frame):
 
 def _measure_with_window(root, filepath, info, model, scale):
     """measure_speed with a small window ("Measuring..."); closing it skips the measure (None)."""
-    win = tk.Toplevel(root)
-    win.title("Upscaling speed")
-    win.configure(bg="#23272e")
-    apply_modern_theme(win)
-    frame = create_styled_frame(win)
-    frame.pack(fill="both", expand=True, padx=14, pady=14)
+    win, frame = new_window("Upscaling speed")
     create_styled_label(frame, f"Measuring the speed of Real-ESRGAN on this computer\n"
                                f"({model.name}, a frame of {os.path.basename(filepath)})...").pack()
     bar = ttk.Progressbar(frame, mode="indeterminate", length=320)
@@ -539,12 +534,7 @@ def run_upscale_jobs(root, jobs, outdir, model=MODELS[0], encoder=None):
     cancel_event = threading.Event()
     results = []
 
-    win = tk.Toplevel(root)
-    win.title("Video Upscaling")
-    win.configure(bg="#23272e")
-    apply_modern_theme(win)
-    frame = create_styled_frame(win)
-    frame.pack(fill="both", expand=True, padx=14, pady=14)
+    win, frame = new_window("Video Upscaling", topmost=False)
     file_label = create_styled_label(frame, "", style='Title.TLabel')
     file_label.pack(pady=(0, 6))
     stage_label = create_styled_label(frame, "Starting...")
@@ -629,12 +619,7 @@ def run_upscale_jobs(root, jobs, outdir, model=MODELS[0], encoder=None):
 
 def _ask_model(root):
     """Dialog to choose the Real-ESRGAN model. Returns the Model, or None if cancelled."""
-    win = tk.Toplevel(root)
-    win.title("Upscale - model")
-    win.configure(bg="#23272e")
-    apply_modern_theme(win)
-    frame = create_styled_frame(win)
-    frame.pack(fill="both", expand=True, padx=14, pady=10)
+    win, frame = new_window("Upscale - model")
     create_styled_label(frame, "What kind of video?", style='Title.TLabel').pack(anchor="w", pady=(2, 6))
     choice = tk.StringVar(master=win, value=MODELS[0].name)
     for model in MODELS:
@@ -653,12 +638,7 @@ def _ask_model(root):
 
 def _ask_target_height(root, filename, width, height, choices):
     """Dialog to choose the target resolution of one video. Returns the height, or None if cancelled."""
-    win = tk.Toplevel(root)
-    win.title(f"Upscale - {filename}")
-    win.configure(bg="#23272e")
-    apply_modern_theme(win)
-    frame = create_styled_frame(win)
-    frame.pack(fill="both", expand=True, padx=14, pady=10)
+    win, frame = new_window(f"Upscale - {filename}")
     create_styled_label(frame, filename, style='Title.TLabel').pack(pady=(2, 2))
     create_styled_label(frame, f"Original resolution: {width}x{height}").pack(pady=(0, 10))
     selected = {"height": None}
@@ -676,12 +656,7 @@ def _ask_target_height(root, filename, width, height, choices):
 
 
 def run_video_upscale_gui():
-    root = tk.Tk()
-    root.withdraw()
-    try:
-        _run_video_upscale(root)
-    finally:
-        root.destroy()
+    _run_video_upscale(app_root())
 
 
 def _run_video_upscale(root):

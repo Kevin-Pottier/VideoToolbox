@@ -53,6 +53,8 @@ SCENARIOS = {
         plan=menu("Video Compression", ["OK"], ["MKV"], [X264, "OK"], ["Fast", "720p", "128 kbps", "Keep the 5.1", "OK"])),
     "compress-keep-original-audio": dict(inputs=["film.mkv"], videos=["film.mkv"], size="0.008",
         plan=menu("Video Compression", ["OK"], ["MKV"], [X264, "OK"], ["Keep the original audio", "OK"])),
+    "compress-constant-quality": dict(inputs=["film.mkv"], videos=["film.mkv"],
+        plan=menu("Video Compression", ["OK"], ["MKV"], [X264, "OK"], ["Constant quality, good", "OK"])),
     "compress-copy-shortcut": dict(inputs=["film.mkv"], videos=["film.mkv"], size="1",
         plan=menu("Video Compression", ["OK"], ["MKV"], [X264, "OK"], SETTINGS)),
     "compress-avi-copy-shortcut": dict(inputs=["megamind.avi"], videos=["megamind.avi"], size="1",
@@ -235,6 +237,20 @@ def check(name, sc, d, result, new):
             log = open(os.path.join(d, "log.txt"), encoding="utf-8", errors="replace").read()
             add("settings applied", "speed fast (preset veryfast), 720p at most, audio AAC 128 kbps per track, surround kept"
                 in log, "see log.txt")
+    elif name == "compress-constant-quality":
+        no_errors()
+        out = output(r"film_compressed\.mkv$")
+        if out:
+            add("codec h264, frames kept", streams(out, "video")[0]["codec_name"] == "h264"
+                and frames(out) == frames(src), f"{frames(out)} vs {frames(src)}")
+            add("both audio tracks, French first", audio_layout(out) == [("fre", 2, 1), ("eng", 2, 0)],
+                str(audio_layout(out)))
+            log = open(os.path.join(d, "log.txt"), encoding="utf-8", errors="replace").read()
+            add("one pass at CRF 22, no size asked", "-crf 22" in log and "-pass" not in log
+                and not [e for e in result["events"] if e[0] == "askstring"], "see log.txt")
+            infos = [e[2] for e in result["events"] if e[0] == "showinfo"]
+            add("the size of the file is told", infos and re.search(r"film_compressed\.mkv \([\d.]+ MB\)", infos[0]),
+                infos[0] if infos else "")
     elif name == "compress-keep-original-audio":
         no_errors()
         out = output(r"film_compressed\.mkv$")

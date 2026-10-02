@@ -68,6 +68,21 @@ PRESETS = {
 # generous values, close to a Blu-ray, so that the encoder is not the limiting factor.
 QUALITY_BITS_PER_PIXEL = {"H.264": 0.12, "HEVC": 0.08, "AV1": 0.06}
 
+# Constant quality, without a target size (the file gets the size the quality needs): the levels offered to the
+# user, and the value of each encoder for them, by ffmpeg encoder name or by GPU family. CPU: constant rate
+# factor; NVIDIA: -cq of its VBR rate control; Intel: ICQ (-global_quality). The quality scales of AMD, VAAPI and
+# Apple differ between drivers and codecs: they get a bitrate from the resolution (QUALITY_BITS_PER_PIXEL times
+# the share of the level).
+QUALITIES = ("high", "good", "small")
+QUALITY_VALUES = {
+    "libx264": (18, 22, 26),
+    "libx265": (20, 24, 28),
+    "libsvtav1": (26, 32, 38),
+    "NVIDIA": (19, 24, 29),
+    "Intel": (20, 24, 28),
+}
+QUALITY_BITRATE_SHARES = (1.0, 0.6, 0.35)
+
 
 def input_args(encoder):
     """Options placed before the inputs."""
@@ -133,18 +148,40 @@ def bitrate_args(encoder, kbps, speed="balanced"):
     return _codec_args(encoder) + extra
 
 
+def quality_value(encoder, quality):
+    """CRF, CQ or ICQ value of the encoder for the quality level, None when it gets a bitrate instead."""
+    values = QUALITY_VALUES.get(encoder.name) or QUALITY_VALUES.get(encoder.hardware)
+    return values[QUALITIES.index(quality)] if values else None
+
+
+def constant_quality_args(encoder, quality, width, height, fps, speed="balanced"):
+    """
+    Encode at a constant quality level (see QUALITIES), without a target size, in one pass. The size of the
+    output frames (width, height, fps) gives the bitrate of the encoders without a quality scale.
+    """
+    value = quality_value(encoder, quality)
+    level = preset(encoder, speed)
+    if encoder.name in ("libx264", "libx265", "libsvtav1"):
+        return _codec_args(encoder) + ["-preset", level, "-crf", str(value)]
+    if encoder.hardware == "NVIDIA":
+        # -b:v 0: no bitrate limit, the quality decides
+        return _codec_args(encoder) + ["-preset", level, "-tune", "hq", "-rc", "vbr", "-cq", str(value), "-b:v", "0",
+                                       "-multipass", "fullres", "-spatial-aq", "1"]
+    if encoder.hardware == "Intel":
+        return _codec_args(encoder) + ["-preset", level, "-global_quality", str(value)]
+    share = QUALITY_BITRATE_SHARES[QUALITIES.index(quality)]
+    return bitrate_args(encoder, int(width * height * fps * QUALITY_BITS_PER_PIXEL[encoder.codec] * share / 1000),
+                        speed)
+
+
 def quality_args(encoder, width, height, fps):
     """
     Encode at a high, constant quality (no target size), e.g. for the upscaled videos.
     CPU encoders use their constant rate factor; GPU encoders, whose quality scales differ between
     vendors and codecs, get a generous bitrate computed from the resolution.
     """
-    if encoder.name == "libx264":
-        return _codec_args(encoder) + ["-preset", "medium", "-crf", "18"]
-    if encoder.name == "libx265":
-        return _codec_args(encoder) + ["-preset", "medium", "-crf", "20"]
-    if encoder.name == "libsvtav1":
-        return _codec_args(encoder) + ["-preset", "8", "-crf", "26"]
+    if not encoder.hardware:
+        return constant_quality_args(encoder, "high", width, height, fps)
     kbps = int(width * height * fps * QUALITY_BITS_PER_PIXEL[encoder.codec] / 1000)
     return bitrate_args(encoder, kbps)
 
