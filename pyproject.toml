@@ -11,3 +11,7 @@ select = ["F", "E9"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = [".", "tests"]
+
+[tool.coverage.run]
+# The code of the application (python -m pytest --cov=.), not the tests
+omit = ["tests/*", "Tool/*"]

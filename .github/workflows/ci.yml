@@ -48,9 +48,11 @@ jobs:
       - run: pip install -r requirements-dev.txt
       # -rs lists the skipped tests, e.g. the integration tests when FFmpeg is missing; the window tests
       # (test_gui_windows.py) need a display: a virtual one on Linux
-      - name: Tests (Linux)
+      - name: Tests (Linux), with the coverage of the code in the summary of the run
         if: runner.os == 'Linux'
-        run: xvfb-run -a python -m pytest -rs
+        run: |
+          xvfb-run -a python -m pytest -rs --cov=. --cov-report=term
+          python -m coverage report --format=markdown >> "$GITHUB_STEP_SUMMARY"
       - name: Tests (Windows)
         if: runner.os == 'Windows'
         run: python -m pytest -rs

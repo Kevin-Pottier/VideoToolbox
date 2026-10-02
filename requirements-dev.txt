@@ -2,4 +2,5 @@
 
 # Tests and lint (see the Development section of the README)
 pytest>=7
+pytest-cov
 ruff
