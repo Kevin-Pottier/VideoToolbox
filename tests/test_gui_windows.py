@@ -55,13 +55,21 @@ class Robot:
         self.delay = 0
         self.errors = []
         self.seen = []
+        self.timers = []
 
     def windows(self):
         return [w for w in self.root.winfo_children() if isinstance(w, tk.Toplevel) and w.winfo_exists()]
 
     def do(self, action, delay=120):
         self.delay += delay
-        self.root.after(self.delay, self._run, action)
+        self.timers.append(self.root.after(self.delay, self._run, action))
+
+    def stop(self):
+        """Cancel the actions not run yet, close the windows left open."""
+        for timer in self.timers:
+            self.root.after_cancel(timer)
+        for window in self.windows():
+            window.destroy()
 
     def _run(self, action):
         try:
@@ -102,13 +110,24 @@ class Robot:
         self.do(lambda: self.seen.append("\n".join(text_of(w) for window in self.windows() for w in walk(window))))
 
 
-@pytest.fixture
-def robot():
-    robot = Robot(gui_helpers.app_root())
-    yield robot
+@pytest.fixture(scope="module")
+def root():
+    """
+    One root for the tests, as in the application: on Windows, creating Tk interpreters again and again in one
+    process ends up failing ("Can't find a usable tk.tcl").
+    """
+    root = gui_helpers.app_root()
+    yield root
     gui_helpers.close_app()
-    del robot.root
+    del root
     gc.collect()  # see has_display
+
+
+@pytest.fixture
+def robot(root):
+    robot = Robot(root)
+    yield robot
+    robot.stop()
     assert robot.errors == []
 
 

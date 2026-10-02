@@ -8,6 +8,7 @@ is closed; closing it with the window button cancels.
 run_jobs runs the work (compressions, conversions...) in worker threads while a window shows a bar and the time
 left for each job: the worker threads never touch Tk, their progress goes through a queue.
 """
+import gc
 import os
 import queue
 import threading
@@ -332,6 +333,9 @@ def run_jobs(title, names, work, done_text=None):
                 if results[index] is None:
                     status["text"] = "Stopping..."
     win.protocol("WM_DELETE_WINDOW", on_close)
+    # The closed dialogs (reference cycles between widgets) are freed here, in the Tk thread: the garbage
+    # collector of a worker thread would make their Tcl calls from the wrong thread
+    gc.collect()
     for index in range(len(names)):
         threading.Thread(target=worker, args=(index,), daemon=True).start()
     poll()
