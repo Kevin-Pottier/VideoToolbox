@@ -1,10 +1,11 @@
 import pytest
 
-from audio_tracks import AudioTrackInfo, MediaFileInfo, SubtitleTrackInfo
-from compression import AUDIO_BITRATE, MIN_VIDEO_BITRATE_KBPS, SIZE_MARGIN, compute_video_bitrate_kbps
+from audio_tracks import AudioTrackInfo, MediaFileInfo, SubtitleTrackInfo, VideoTrackInfo
+from compression import (AUDIO_BITRATE, MIN_VIDEO_BITRATE_KBPS, SIZE_MARGIN, CompressionSettings,
+                         compute_video_bitrate_kbps)
 
 # A film with the English audio first and the French one second, text and bitmap (PGS) subtitles
-FILM = MediaFileInfo("in.mkv",
+FILM = MediaFileInfo("in.mkv", video_tracks=[VideoTrackInfo(0, "h264", 1920, 1080)],
                      audio_tracks=[AudioTrackInfo(1, "eng", channels=2, is_default=True), AudioTrackInfo(2, "fre", channels=6)],
                      subtitle_tracks=[SubtitleTrackInfo(3, "eng", codec="subrip"),
                                       SubtitleTrackInfo(4, "fre", codec="hdmv_pgs_subtitle")])
@@ -14,7 +15,7 @@ GIB_IN_BITS = 1024 ** 3 * 8
 
 def test_budget_fills_the_target_size_minus_the_margin():
     duration = 3600
-    kbps = compute_video_bitrate_kbps(1.0, duration, 1)
+    kbps = compute_video_bitrate_kbps(1.0, duration, AUDIO_BITRATE)
     total_bits = (kbps * 1000 + AUDIO_BITRATE) * duration
     budget = GIB_IN_BITS * (1 - SIZE_MARGIN)
     assert total_bits <= budget
@@ -22,25 +23,25 @@ def test_budget_fills_the_target_size_minus_the_margin():
 
 
 def test_each_encoded_audio_track_costs_the_encoded_audio_bitrate():
-    one_track = compute_video_bitrate_kbps(2.0, 5400, 1)
-    two_tracks = compute_video_bitrate_kbps(2.0, 5400, 2)
+    one_track = compute_video_bitrate_kbps(2.0, 5400, AUDIO_BITRATE)
+    two_tracks = compute_video_bitrate_kbps(2.0, 5400, 2 * AUDIO_BITRATE)
     assert abs((one_track - two_tracks) - AUDIO_BITRATE / 1000) <= 1
 
 
 def test_video_without_audio_gets_the_whole_budget():
-    assert compute_video_bitrate_kbps(1.0, 100, 0) > compute_video_bitrate_kbps(1.0, 100, 1)
+    assert compute_video_bitrate_kbps(1.0, 100, 0) > compute_video_bitrate_kbps(1.0, 100, AUDIO_BITRATE)
 
 
 def test_too_small_target_is_below_the_minimum():
     # 0.1 MiB for 20 s leaves a negative budget once the 192 kbps audio is counted
-    assert compute_video_bitrate_kbps(0.0001, 20, 1) < MIN_VIDEO_BITRATE_KBPS
+    assert compute_video_bitrate_kbps(0.0001, 20, AUDIO_BITRATE) < MIN_VIDEO_BITRATE_KBPS
 
 
-def two_pass(sub_option="none", sub_path=None, ext="mp4", encoder="libx264"):
+def two_pass(sub_option="none", sub_path=None, ext="mp4", encoder="libx264", settings=CompressionSettings()):
     from compression import build_encode_commands
     from encoders import BY_NAME
     return build_encode_commands("in.mkv", "out." + ext, ext, 1500, sub_option, sub_path, "work", FILM, "-fps_mode",
-                                 BY_NAME[encoder])
+                                 BY_NAME[encoder], settings)
 
 
 def option(cmd, name):
@@ -129,6 +130,38 @@ def test_a_stuck_ffmpeg_is_killed(monkeypatch):
     with pytest.raises(compression.CompressionError, match="stopped responding"):
         compression._encode([(silent_command, 1.0)], 10, None, lambda *progress: None)
     assert time.time() - start < 15
+
+
+def test_default_settings_keep_the_former_commands():
+    pass2 = two_pass()[1][0]
+    assert option(pass2, "-preset") == "medium" and option(pass2, "-vf") == "format=yuv420p"
+    assert option(pass2, "-ac") == "2" and option(pass2, "-b:a") == "192k" and "-af" not in pass2
+
+
+def test_the_speed_sets_the_preset_of_both_passes():
+    for cmd, _ in two_pass(settings=CompressionSettings(speed="fast")):
+        assert option(cmd, "-preset") == "veryfast"
+
+
+def test_a_taller_video_is_reduced_in_both_passes_then_the_subtitles_are_burned():
+    settings = CompressionSettings(max_height=720)
+    for cmd, _ in two_pass("hard", "work/subtitles.srt", settings=settings):
+        # Drawn after the resize: the subtitles stay sharp at the output resolution
+        assert option(cmd, "-vf") == "scale=-2:720:flags=lanczos,subtitles=subtitles.srt,format=yuv420p"
+    # A video not taller than the maximum keeps its resolution
+    assert option(two_pass(settings=CompressionSettings(max_height=1080))[1][0], "-vf") == "format=yuv420p"
+
+
+def test_audio_bitrate_and_surround():
+    from compression import audio_bitrates
+    stereo = two_pass(settings=CompressionSettings(audio_kbps=128))[1][0]
+    assert option(stereo, "-b:a") == "128k" and option(stereo, "-ac") == "2"
+    surround = two_pass(settings=CompressionSettings(audio_kbps=128, keep_surround=True))[1][0]
+    assert "-ac" not in surround and option(surround, "-af") == "aformat=channel_layouts=mono|stereo|5.1|7.1"
+    # Output order: the French 5.1 first, at twice the bitrate, then the English stereo
+    assert (option(surround, "-b:a:0"), option(surround, "-b:a:1")) == ("256k", "128k")
+    assert audio_bitrates(FILM, CompressionSettings(audio_kbps=128, keep_surround=True)) == [256000, 128000]
+    assert audio_bitrates(FILM) == [192000, 192000]
 
 
 def test_x265_two_passes_share_a_relative_statistics_file():

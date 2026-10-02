@@ -2,7 +2,10 @@ import tkinter as tk
 from tkinter import filedialog, simpledialog, messagebox, ttk
 from colorama import Fore, Style
 import os
-from compression import CompressionError, run_compression
+import encoders
+from audio_tracks import ffprobe_streams
+from compression import (AUDIO_BITRATE, AUDIO_KBPS_CHOICES, MAX_HEIGHT_CHOICES, CompressionError, CompressionSettings,
+                         run_compression)
 from gui_helpers import (apply_modern_theme, choose_encoder, create_styled_button, create_styled_frame,
                          create_styled_label, show_message)
 
@@ -90,6 +93,86 @@ def ask_container(title="Choose Output Container", prompt="Choose the output con
     return ext
 
 
+SPEED_TEXTS = {
+    "fast": "Fast: about twice as fast, slightly lower quality",
+    "balanced": "Balanced: the usual trade-off",
+    "quality": "Best quality: 2 to 3 times slower, slightly better picture at the same size",
+}
+
+
+def video_height(path):
+    """Height of the video, or None if it cannot be read."""
+    try:
+        media = ffprobe_streams(path)
+    except (RuntimeError, OSError):
+        return None
+    return media.video_tracks[0].height if media.video_tracks else None
+
+
+def ask_compression_settings(encoder, paths):
+    """
+    Settings dialog: speed (preset of the encoder), maximum height and audio. Only the heights below the
+    tallest of the videos are offered. Returns a CompressionSettings, or None if the window is closed.
+    """
+    from tkinter import ttk
+    heights = [h for h in map(video_height, paths) if h]
+    tallest = max(heights, default=None)
+    root = tk.Tk()
+    root.title("Compression settings")
+    root.attributes('-topmost', True)
+    root.configure(bg="#23272e")
+    apply_modern_theme(root)
+    frame = create_styled_frame(root)
+    frame.pack(fill="both", expand=True, padx=14, pady=10)
+    speed = tk.StringVar(master=root, value="balanced")
+    max_height = tk.IntVar(master=root, value=0)  # 0: the resolution is kept
+    audio_kbps = tk.IntVar(master=root, value=AUDIO_BITRATE // 1000)
+    keep_surround = tk.BooleanVar(master=root, value=False)
+    note = {"font": ("Segoe UI", 9, "italic")}
+
+    create_styled_label(frame, "Speed / quality", style='Title.TLabel').pack(anchor="w")
+    for level in encoders.SPEEDS:
+        preset = encoders.preset(encoder, level)
+        ttk.Radiobutton(frame, text=SPEED_TEXTS[level] + (f" (preset {preset})" if preset else ""), variable=speed,
+                        value=level, style='TRadiobutton').pack(anchor="w", padx=10)
+    if not encoders.preset(encoder):
+        create_styled_label(frame, f"{encoder.label} has no speed setting: the three are the same.", **note).pack(
+            anchor="w", padx=10)
+
+    create_styled_label(frame, "Resolution", style='Title.TLabel').pack(anchor="w", pady=(10, 0))
+    keep = "Keep the resolution" + (f" ({tallest} lines)" if tallest and len(paths) == 1 else "")
+    ttk.Radiobutton(frame, text=keep, variable=max_height, value=0, style='TRadiobutton').pack(anchor="w", padx=10)
+    for height in MAX_HEIGHT_CHOICES:
+        if tallest is None or height < tallest:
+            ttk.Radiobutton(frame, text=f"{height}p at most", variable=max_height, value=height,
+                            style='TRadiobutton').pack(anchor="w", padx=10)
+    create_styled_label(frame, "For a small size, a lower resolution gives a sharper picture than a full resolution\n"
+                               "starved of bitrate (smaller videos keep their own).", **note).pack(anchor="w", padx=10)
+
+    create_styled_label(frame, "Audio (every track is kept)", style='Title.TLabel').pack(anchor="w", pady=(10, 0))
+    row = create_styled_frame(frame)
+    row.pack(anchor="w", padx=10)
+    for kbps in AUDIO_KBPS_CHOICES:
+        ttk.Radiobutton(row, text=f"{kbps} kbps", variable=audio_kbps, value=kbps, style='TRadiobutton').pack(
+            side="left", padx=(0, 8))
+    ttk.Checkbutton(frame, text="Keep the 5.1 / 7.1 surround (twice the bitrate for those tracks), instead of stereo",
+                    variable=keep_surround, style='TCheckbutton').pack(anchor="w", padx=10, pady=(4, 0))
+    create_styled_label(frame, "Bitrate per stereo track: 128 kbps is good, 192 kbps very good.", **note).pack(
+        anchor="w", padx=10)
+
+    result = {}
+
+    def ok():
+        result["settings"] = CompressionSettings(speed.get(), max_height.get() or None, audio_kbps.get(),
+                                                 keep_surround.get())
+        root.quit()
+    create_styled_button(frame, "OK", ok, width=12).pack(pady=(12, 0))
+    root.protocol("WM_DELETE_WINDOW", root.quit)
+    root.mainloop()
+    root.destroy()
+    return result.get("settings")
+
+
 def ask_max_size(title="Target Video Size", prompt="Enter the maximum file size in GB:"):
     """Asks for the target size in GB until it is valid; returns None if the dialog is cancelled."""
     while True:
@@ -134,13 +217,17 @@ def run_video_compression():
         if encoder is None:
             print(Fore.RED + "No encoder selected. Aborting." + Style.RESET_ALL)
             return
+        settings = ask_compression_settings(encoder, [path])
+        if settings is None:
+            print(Fore.RED + "No settings chosen. Aborting." + Style.RESET_ALL)
+            return
 
         max_size_gb = ask_max_size()
         if max_size_gb is None:
             return
 
         try:
-            run_compression(path, sub_option, sub_file, ext, max_size_gb, encoder=encoder)
+            run_compression(path, sub_option, sub_file, ext, max_size_gb, encoder=encoder, settings=settings)
         except CompressionError as e:
             print(Fore.RED + f"❌ {e}" + Style.RESET_ALL)
             show_message("error", "Compression failed", f"{os.path.basename(path)}:\n{e}")
@@ -180,6 +267,10 @@ def run_video_compression():
     encoder = choose_encoder()
     if encoder is None:
         print(Fore.RED + "No encoder selected. Aborting." + Style.RESET_ALL)
+        return
+    settings = ask_compression_settings(encoder, file_paths)
+    if settings is None:
+        print(Fore.RED + "No settings chosen. Aborting." + Style.RESET_ALL)
         return
 
     # Step 4: Max size (reuse logic)
@@ -238,7 +329,8 @@ def run_video_compression():
         def gui_progress(percent, mins, secs):
             progress_queues[idx].put((percent, mins, secs))
         try:
-            run_compression(path, sub_option, sub_file, ext, max_size_gb, gui_progress=gui_progress, encoder=encoder)
+            run_compression(path, sub_option, sub_file, ext, max_size_gb, gui_progress=gui_progress, encoder=encoder,
+                            settings=settings)
         except CompressionError as e:
             print(Fore.RED + f"❌ {os.path.basename(path)}: {e}" + Style.RESET_ALL)
             failures[idx] = str(e)

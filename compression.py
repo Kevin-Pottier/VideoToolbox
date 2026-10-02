@@ -10,6 +10,8 @@ import sys
 import tempfile
 import threading
 import time
+from dataclasses import dataclass
+from typing import Optional
 from colorama import Fore, Style
 from audio_tracks import MP4_CONVERTIBLE_SUBTITLE_CODECS, ffprobe_streams, french_default_dispositions, french_first
 import encoders
@@ -18,7 +20,9 @@ import subprocess
 # Import reusable GUI helpers for modern, DRY window/dialog creation
 from gui_helpers import apply_modern_theme, create_styled_frame, create_styled_label
 
-AUDIO_BITRATE = 192000  # bps per audio track: used in the ffmpeg command and in the size budget
+AUDIO_BITRATE = 192000  # default bps of an audio track: used in the ffmpeg command and in the size budget
+AUDIO_KBPS_CHOICES = (96, 128, 160, 192, 256)  # offered per (stereo) audio track
+MAX_HEIGHT_CHOICES = (1080, 720, 480)  # offered output heights (a smaller video keeps its own)
 SIZE_MARGIN = 0.02  # share of the target size kept for the container overhead and the encoder deviation
 MIN_VIDEO_BITRATE_KBPS = 100
 FIRST_PASS_SHARE = 0.35  # the analysis pass is faster (x264 uses a fast first pass): share of the progress bar
@@ -30,17 +34,51 @@ _GPU_SESSIONS = threading.BoundedSemaphore(2)
 class CompressionError(Exception):
     """The compression could not be done: the message tells the user why."""
 
-def compute_video_bitrate_kbps(max_size_gb, duration, n_audio_tracks, margin=SIZE_MARGIN):
+
+@dataclass(frozen=True)
+class CompressionSettings:
+    """Choices of the user besides the encoder and the size. The defaults are the former fixed values."""
+    speed: str = "balanced"           # encoders.SPEEDS: the preset of the encoder
+    max_height: Optional[int] = None  # a taller video is reduced to this height (the width follows)
+    audio_kbps: int = AUDIO_BITRATE // 1000  # per stereo or mono track
+    keep_surround: bool = False       # keep 5.1/7.1 tracks (at twice the bitrate) instead of the stereo down-mix
+
+    def describe(self, encoder):
+        level = encoders.preset(encoder, self.speed)
+        return (f"speed {self.speed}" + (f" (preset {level})" if level else "")
+                + (f", {self.max_height}p at most" if self.max_height else "")
+                + f", audio {self.audio_kbps} kbps per track" + (", surround kept" if self.keep_surround else ", stereo"))
+
+
+DEFAULT_SETTINGS = CompressionSettings()
+
+
+def audio_bitrates(media, settings=DEFAULT_SETTINGS):
+    """Bitrate (bps) of each audio track of the output, in the output order (French tracks first)."""
+    return [settings.audio_kbps * 1000 * (2 if settings.keep_surround and (track.channels or 2) > 2 else 1)
+            for track in french_first(media.audio_tracks)]
+
+
+def scaled_height(media, settings=DEFAULT_SETTINGS):
+    """Height the video is reduced to, or None when it keeps its own (not taller than the maximum)."""
+    height = media.video_tracks[0].height if media.video_tracks else None
+    if settings.max_height and height and height > settings.max_height:
+        return settings.max_height
+    return None
+
+
+def compute_video_bitrate_kbps(max_size_gb, duration, audio_bps, margin=SIZE_MARGIN):
     """
-    Video bitrate (kbps) that makes the output fit in max_size_gb, given the audio
-    tracks encoded at AUDIO_BITRATE and the margin kept free. Can be negative if the size is too small.
+    Video bitrate (kbps) that makes the output fit in max_size_gb, given the bitrate of all the audio tracks
+    (bps) and the margin kept free. Can be negative if the size is too small.
     """
     target_bits = max_size_gb * 1024 * 1024 * 1024 * 8 * (1 - margin)  # in bits
-    audio_bits_total = AUDIO_BITRATE * n_audio_tracks * duration  # in bits
+    audio_bits_total = audio_bps * duration  # in bits
     video_bitrate = (target_bits - audio_bits_total) / duration  # in bits per second
     return int(video_bitrate / 1000)  # in kbps
 
-def run_compression(file_path, sub_option, sub_file, ext, max_size_gb, gui_progress=None, encoder=None) -> str:
+def run_compression(file_path, sub_option, sub_file, ext, max_size_gb, gui_progress=None, encoder=None,
+                    settings=DEFAULT_SETTINGS) -> str:
     """
     Compress a video file using FFmpeg, with optional subtitle handling and GUI/CLI progress bars.
     Args:
@@ -50,6 +88,7 @@ def run_compression(file_path, sub_option, sub_file, ext, max_size_gb, gui_progr
         ext (str): Output file extension ('mp4' or 'mkv').
         max_size_gb (float): Target maximum file size in GB.
         encoder (encoders.Encoder): Video encoder, x264 by default.
+        settings (CompressionSettings): speed, maximum height and audio.
     Returns:
         str: path of the compressed file.
     Raises:
@@ -65,23 +104,26 @@ def run_compression(file_path, sub_option, sub_file, ext, max_size_gb, gui_progr
     if not duration or duration <= 0:
         raise CompressionError(f"Could not determine the duration of {os.path.basename(file_path)}.")
 
-    # Every audio track is kept and re-encoded at AUDIO_BITRATE: the budget depends on the number
+    # Every audio track is kept and re-encoded at the chosen bitrate: the budget depends on the number
     # of tracks, not on the source bitrate
+    audio_bps = sum(audio_bitrates(media, settings))
     n_audio_out = len(media.audio_tracks)
 
     print(f"Duration: {duration:.2f} s")
-    print(f"Audio: {n_audio_out} track(s) encoded at {AUDIO_BITRATE // 1000} kbps")
+    print(f"Settings: {settings.describe(encoder)}")
+    print(f"Audio: {n_audio_out} track(s), {audio_bps // 1000} kbps in all")
 
-    video_bitrate_kbps = compute_video_bitrate_kbps(max_size_gb, duration, n_audio_out, encoders.size_margin(encoder))
+    video_bitrate_kbps = compute_video_bitrate_kbps(max_size_gb, duration, audio_bps, encoders.size_margin(encoder))
 
     print(f"Target Video Bitrate: {video_bitrate_kbps} kbps")
     if video_bitrate_kbps < MIN_VIDEO_BITRATE_KBPS:
-        smallest_gb = ((MIN_VIDEO_BITRATE_KBPS * 1000 + AUDIO_BITRATE * n_audio_out) * duration / 8
+        smallest_gb = ((MIN_VIDEO_BITRATE_KBPS * 1000 + audio_bps) * duration / 8
                        / (1 - encoders.size_margin(encoder)) / 1024 ** 3)
         raise CompressionError(f"Target size too small: only {max(video_bitrate_kbps, 0)} kbps would be left for the "
-                               f"video (minimum {MIN_VIDEO_BITRATE_KBPS} kbps, with {n_audio_out} audio track(s) at "
-                               f"{AUDIO_BITRATE // 1000} kbps).\nThe smallest size for this video is "
-                               f"{math.ceil(smallest_gb * 1000) / 1000:.3f} GB.")
+                               f"video (minimum {MIN_VIDEO_BITRATE_KBPS} kbps, with {n_audio_out} audio track(s), "
+                               f"{audio_bps // 1000} kbps in all).\nThe smallest size for this video is "
+                               f"{math.ceil(smallest_gb * 1000) / 1000:.3f} GB (or lower the audio bitrate in the "
+                               "settings).")
 
     output_file = os.path.splitext(file_path)[0] + f"_compressed.{ext}"
 
@@ -117,21 +159,22 @@ def run_compression(file_path, sub_option, sub_file, ext, max_size_gb, gui_progr
 
     try:
         # Shortcut: a file already under the target size only needs its streams copied (seconds, no quality
-        # loss, original audio kept). Burned subtitles need a re-encode; if the copy fails (codec the container
-        # cannot store), the file is encoded as usual.
-        if sub_option != "hard" and os.path.getsize(file_path) <= max_size_gb * 1024 ** 3 * (1 - SIZE_MARGIN):
-            print(Fore.YELLOW + "\nThe file is already under the target size: copying the streams without re-encoding\n"
-                  + Style.RESET_ALL)
-            try:
-                run([(build_copy_command(input_path, output_path, ext, sub_option, sub_path, media), 1.0)])
-                return output_file
-            except CompressionError:
-                print(Fore.YELLOW + "Copy impossible in this container, encoding the file instead." + Style.RESET_ALL)
-                # The file was already small enough: no need to make it bigger than the source
-                source_kbps = int(os.path.getsize(file_path) * 8 / duration / 1000)
-                video_bitrate_kbps = min(video_bitrate_kbps, max(source_kbps, MIN_VIDEO_BITRATE_KBPS))
+        # loss, original audio kept). Burned subtitles and a smaller resolution need a re-encode; if the copy
+        # fails (codec the container cannot store), the file is encoded as usual.
+        if os.path.getsize(file_path) <= max_size_gb * 1024 ** 3 * (1 - SIZE_MARGIN):
+            if sub_option != "hard" and not scaled_height(media, settings):
+                print(Fore.YELLOW + "\nThe file is already under the target size: copying the streams without "
+                      "re-encoding\n" + Style.RESET_ALL)
+                try:
+                    run([(build_copy_command(input_path, output_path, ext, sub_option, sub_path, media), 1.0)])
+                    return output_file
+                except CompressionError:
+                    print(Fore.YELLOW + "Copy impossible in this container, encoding the file instead." + Style.RESET_ALL)
+            # The file was already small enough: no need to make it bigger than the source
+            source_kbps = int(os.path.getsize(file_path) * 8 / duration / 1000)
+            video_bitrate_kbps = min(video_bitrate_kbps, max(source_kbps, MIN_VIDEO_BITRATE_KBPS))
         passes = build_encode_commands(input_path, output_path, ext, video_bitrate_kbps, sub_option, sub_path, work_dir,
-                                       media, fps_mode_option(), encoder)
+                                       media, fps_mode_option(), encoder, settings)
         print(Fore.YELLOW + f"\nRunning ffmpeg ({encoder.label}, {len(passes)} pass(es)) with subtitles option: "
               f"{sub_option}\n" + Style.RESET_ALL)
         run(passes, _GPU_SESSIONS if encoder.hardware else contextlib.nullcontext())
@@ -179,8 +222,20 @@ def output_streams(media, ext, added_subtitle):
     return args
 
 
+def audio_args(media, settings=DEFAULT_SETTINGS):
+    """Audio codec arguments: AAC at the chosen bitrate, down-mixed to stereo unless the surround is kept."""
+    args = ["-c:a", "aac", "-ar", "48000"]
+    if not settings.keep_surround:
+        return args + ["-ac", "2", "-b:a", f"{settings.audio_kbps}k"]
+    # Standard layouts: the 5.1(side) of DTS/AC3 tracks would be an unknown layout in AAC
+    args += ["-af", "aformat=channel_layouts=mono|stereo|5.1|7.1"]
+    for index, bps in enumerate(audio_bitrates(media, settings)):
+        args += [f"-b:a:{index}", f"{bps // 1000}k"]
+    return args
+
+
 def build_encode_commands(input_path, output_path, ext, video_bitrate_kbps, sub_option, sub_path, work_dir, media,
-                          fps_mode="-fps_mode", encoder=encoders.DEFAULT):
+                          fps_mode="-fps_mode", encoder=encoders.DEFAULT, settings=DEFAULT_SETTINGS):
     """
     ffmpeg commands that encode the video at the bitrate that fits the target size.
     Two-pass encoders (x264, x265) first analyse the video, then use these statistics to distribute
@@ -188,20 +243,27 @@ def build_encode_commands(input_path, output_path, ext, video_bitrate_kbps, sub_
     Both passes must encode exactly the same frames: the timestamps are passed through, otherwise
     the MP4 output of the second pass can duplicate a frame that the first pass did not analyse
     (x264 then fails with "Incomplete MB-tree stats file" or even hangs).
-    media is the audio_tracks.MediaFileInfo of the input, fps_mode the option name given by utils.fps_mode_option().
+    media is the audio_tracks.MediaFileInfo of the input, fps_mode the option name given by utils.fps_mode_option(),
+    settings the CompressionSettings (preset, maximum height, audio).
     Returns:
         list: (command, share of the total work) for each pass.
     """
-    # Plain relative subtitle name, resolved in the working directory: no filter escaping needed
-    filters = [f"subtitles={os.path.basename(sub_path)}"] if sub_option == "hard" and sub_path else []
+    filters = []
+    height = scaled_height(media, settings)
+    if height:
+        filters.append(f"scale=-2:{height}:flags=lanczos")  # the width follows (even), the aspect ratio is kept
+    if sub_option == "hard" and sub_path:
+        # After the resize: the subtitles are drawn at the output resolution, sharp.
+        # Plain relative subtitle name, resolved in the working directory: no filter escaping needed
+        filters.append(f"subtitles={os.path.basename(sub_path)}")
     video_args = [*encoders.filter_args(encoder, filters), fps_mode, "passthrough",
-                  *encoders.bitrate_args(encoder, video_bitrate_kbps)]
+                  *encoders.bitrate_args(encoder, video_bitrate_kbps, settings.speed)]
     hw_input = encoders.input_args(encoder)
     soft = sub_option == "soft" and bool(sub_path)
     inputs = [*hw_input, "-i", input_path, *(["-i", sub_path] if soft else [])]
     streams = output_streams(media, ext, soft)
-    audio_args = ["-c:a", "aac", "-ac", "2", "-ar", "48000", "-b:a", f"{AUDIO_BITRATE // 1000}k"]
-    output_args = [*video_args, *audio_args, *streams, "-movflags", "+faststart", output_path]
+    audio = audio_args(media, settings)
+    output_args = [*video_args, *audio, *streams, "-movflags", "+faststart", output_path]
     if not encoder.two_pass:
         return [(["ffmpeg", "-y", *inputs, *output_args], 1.0)]
 
@@ -214,7 +276,7 @@ def build_encode_commands(input_path, output_path, ext, video_bitrate_kbps, sub_
     # Both passes encode the same video stream (the first one, as in output_streams)
     pass1 = ["ffmpeg", "-y", *hw_input, "-i", input_path, "-map", "0:v:0", *video_args, *pass_args(1),
              "-an", "-sn", "-f", "null", "-"]
-    pass2 = ["ffmpeg", "-y", *inputs, *video_args, *pass_args(2), *audio_args, *streams,
+    pass2 = ["ffmpeg", "-y", *inputs, *video_args, *pass_args(2), *audio, *streams,
              "-movflags", "+faststart", output_path]
     return [(pass1, FIRST_PASS_SHARE), (pass2, 1 - FIRST_PASS_SHARE)]
 

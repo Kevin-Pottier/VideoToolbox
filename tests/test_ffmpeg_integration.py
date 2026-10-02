@@ -442,3 +442,39 @@ def test_cancelling_in_the_middle_of_the_pipeline_stops_every_process(tmp_path, 
         gui_upscale.upscale_video(str(src), gui_upscale.probe_video(str(src)), 72, str(outdir), report, cancel)
     assert time.time() - start < 30
     assert os.listdir(outdir) == []
+
+
+@pytest.fixture
+def hd_surround(tmp_path):
+    """720p video with a 5.1(side) track, as in DTS/AC3 movies (light grain: heavy noise at every frame cannot
+    be compressed to the target, whatever the encoder)."""
+    path = tmp_path / "hd.mkv"
+    run_ffmpeg("-f", "lavfi", "-i", "testsrc2=size=1280x720:rate=25:duration=2,noise=alls=4:allf=t",
+               "-f", "lavfi", "-i", "anoisesrc=d=2:amplitude=0.1,aformat=channel_layouts=5.1(side)",
+               "-c:v", "libx264", "-crf", "18", "-c:a", "ac3", str(path))
+    return str(path)
+
+
+def test_compression_settings_resolution_speed_and_surround(hd_surround):
+    import compression
+    settings = compression.CompressionSettings(speed="fast", max_height=480, audio_kbps=96, keep_surround=True)
+    out = compression.run_compression(hd_surround, "none", None, "mp4", 0.0004, gui_progress=noop, settings=settings)
+
+    video = streams_of_type(out, "video")[0]
+    assert (video["width"], video["height"]) == (854, 480)
+    assert count_frames(out) == count_frames(hd_surround)
+    [audio] = streams_of_type(out, "audio")
+    assert (audio["channels"], audio["channel_layout"]) == (6, "5.1")  # 5.1(side) mapped to the standard layout
+    assert os.path.getsize(out) <= 0.0004 * 1024 ** 3
+
+
+def test_a_small_file_reduced_in_resolution_is_encoded_but_not_bigger(hd_surround):
+    # Under the target, the copy shortcut cannot reduce the resolution: the file is encoded, at the bitrate
+    # of the source at most (not the whole budget, about 40 Mbps here)
+    import compression
+    settings = compression.CompressionSettings(max_height=480, audio_kbps=96)
+    out = compression.run_compression(hd_surround, "none", None, "mkv", 0.01, gui_progress=noop, settings=settings)
+
+    assert streams_of_type(out, "video")[0]["height"] == 480
+    assert streams_of_type(out, "audio")[0]["channels"] == 2  # stereo by default
+    assert os.path.getsize(out) <= os.path.getsize(hd_surround) * 1.1

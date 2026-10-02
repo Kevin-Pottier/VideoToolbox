@@ -17,6 +17,26 @@ def test_bitrate_args_select_the_encoder_and_the_bitrate(encoder):
         assert option(args, "-tag:v") == "hvc1"  # required by Apple players for HEVC in MP4
 
 
+@pytest.mark.parametrize("name, option_name, presets", [
+    ("libx264", "-preset", ["veryfast", "medium", "slower"]),
+    ("libx265", "-preset", ["veryfast", "medium", "slow"]),
+    ("libsvtav1", "-preset", ["10", "8", "6"]),
+    ("hevc_nvenc", "-preset", ["p3", "p5", "p7"]),
+    ("h264_amf", "-quality", ["speed", "balanced", "quality"]),
+    ("hevc_qsv", "-preset", ["faster", "slow", "veryslow"]),
+])
+def test_each_speed_level_selects_a_preset_of_the_encoder(name, option_name, presets):
+    # "balanced" is what the compression used before the choice existed (AMD aside, see encoders.PRESETS)
+    assert [option(encoders.bitrate_args(BY_NAME[name], 2500, speed), option_name) for speed in encoders.SPEEDS] == presets
+    assert option(encoders.bitrate_args(BY_NAME[name], 2500), option_name) == presets[1]  # default: balanced
+
+
+@pytest.mark.parametrize("name", ["h264_vaapi", "hevc_videotoolbox"])
+def test_encoders_without_preset_ignore_the_speed(name):
+    assert encoders.preset(BY_NAME[name], "fast") is None
+    assert encoders.bitrate_args(BY_NAME[name], 2500, "fast") == encoders.bitrate_args(BY_NAME[name], 2500, "quality")
+
+
 @pytest.mark.parametrize("encoder", ENCODERS, ids=lambda e: e.name)
 def test_every_encoder_gets_8_bit_420_frames(encoder):
     vf = option(encoders.filter_args(encoder, ["subtitles=subtitles.srt"]), "-vf")

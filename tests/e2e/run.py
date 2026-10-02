@@ -31,6 +31,7 @@ GIB = 1024 ** 3
 SUB_SOFT = ["Softcode", "Choose Subtitle File", "OK"]
 SUB_HARD = ["Hardcode", "Choose Subtitle File", "OK"]
 X264, X265, AV1 = "encoder:H.264 CPU", "encoder:HEVC CPU", "encoder:AV1 CPU"
+SETTINGS = ["OK"]  # compression settings left as they are (balanced, resolution kept, 192 kbps stereo)
 
 
 def menu(item, *steps):
@@ -41,24 +42,26 @@ def menu(item, *steps):
 SCENARIOS = {
     # ---- Video compression
     "compress-nosub-mp4-x264": dict(inputs=["film.mkv"], videos=["film.mkv"], size="0.008",
-        plan=menu("Video Compression", ["OK"], ["MP4"], [X264, "OK"])),
+        plan=menu("Video Compression", ["OK"], ["MP4"], [X264, "OK"], SETTINGS)),
     "compress-soft-mkv-x265": dict(inputs=["film.mkv", "film.en.srt"], videos=["film.mkv"], subtitles=["film.en.srt"],
-        size="0.008", plan=menu("Video Compression", SUB_SOFT, ["MKV"], [X265, "OK"])),
+        size="0.008", plan=menu("Video Compression", SUB_SOFT, ["MKV"], [X265, "OK"], SETTINGS)),
     "compress-hard-mp4-av1": dict(inputs=["film.mkv", "film.en.srt"], videos=["film.mkv"], subtitles=["film.en.srt"],
-        size="0.008", plan=menu("Video Compression", SUB_HARD, ["MP4"], [AV1, "OK"])),
+        size="0.008", plan=menu("Video Compression", SUB_HARD, ["MP4"], [AV1, "OK"], SETTINGS)),
     "compress-gpu-hevc": dict(inputs=["film.mkv"], videos=["film.mkv"], size="0.008",
-        plan=menu("Video Compression", ["OK"], ["MKV"], ["encoder:HEVC GPU", "OK"])),
+        plan=menu("Video Compression", ["OK"], ["MKV"], ["encoder:HEVC GPU", "OK"], SETTINGS)),
+    "compress-settings-720p-fast-128k-surround": dict(inputs=["film.mkv"], videos=["film.mkv"], size="0.008",
+        plan=menu("Video Compression", ["OK"], ["MKV"], [X264, "OK"], ["Fast", "720p", "128 kbps", "Keep the 5.1", "OK"])),
     "compress-copy-shortcut": dict(inputs=["film.mkv"], videos=["film.mkv"], size="1",
-        plan=menu("Video Compression", ["OK"], ["MKV"], [X264, "OK"])),
+        plan=menu("Video Compression", ["OK"], ["MKV"], [X264, "OK"], SETTINGS)),
     "compress-avi-copy-shortcut": dict(inputs=["megamind.avi"], videos=["megamind.avi"], size="1",
-        plan=menu("Video Compression", ["OK"], ["MKV"], [X264, "OK"])),
+        plan=menu("Video Compression", ["OK"], ["MKV"], [X264, "OK"], SETTINGS)),
     "compress-batch-2-files": dict(inputs=["film.mkv", "cockatoo.mp4", "film.en.srt"], videos=["film.mkv", "cockatoo.mp4"],
         subtitles=["film.en.srt"], size="0.004",
-        plan=menu("Video Compression", ["film.mkv", "OK"], SUB_SOFT, ["MKV"], [X264, "OK"])),
+        plan=menu("Video Compression", ["film.mkv", "OK"], SUB_SOFT, ["MKV"], [X264, "OK"], SETTINGS)),
     "compress-invalid-sizes-then-too-small": dict(inputs=["cockatoo.mp4"], videos=["cockatoo.mp4"],
-        size=["abc", "-1", "0.0004"], plan=menu("Video Compression", ["OK"], ["MP4"], [X264, "OK"])),
+        size=["abc", "-1", "0.0004"], plan=menu("Video Compression", ["OK"], ["MP4"], [X264, "OK"], SETTINGS)),
     "compress-size-cancelled": dict(inputs=["cockatoo.mp4"], videos=["cockatoo.mp4"], size=None,
-        plan=menu("Video Compression", ["OK"], ["MP4"], [X264, "OK"])),
+        plan=menu("Video Compression", ["OK"], ["MP4"], [X264, "OK"], SETTINGS)),
     "compress-no-file-chosen": dict(inputs=[], videos=[], plan=menu("Video Compression")),
     # ---- Subtitle translation
     "translate-film-en-fr": dict(inputs=["film.en.srt"], subtitles=["film.en.srt"], fake_google=True,
@@ -200,6 +203,21 @@ def check(name, sc, d, result, new):
                 bottom, top = band_psnr(out, src, "bottom"), band_psnr(out, src, "top")
                 add("subtitles burned (the bottom differs from the source)", bottom < top - 3,
                     f"bottom {bottom:.1f} dB, top {top:.1f} dB")
+    elif name == "compress-settings-720p-fast-128k-surround":
+        no_errors()
+        out = output(r"film_compressed\.mkv$")
+        if out:
+            video = streams(out, "video")[0]
+            add("720p", (video["width"], video["height"]) == (1280, 720), f"{video['width']}x{video['height']}")
+            add("frames kept", frames(out) == frames(src), f"{frames(out)} vs {frames(src)}")
+            add("French 5.1 kept first, English stereo", audio_layout(out) == [("fre", 6, 1), ("eng", 2, 0)],
+                str(audio_layout(out)))
+            ratio = os.path.getsize(out) / (float(sc["size"]) * GIB)
+            add("size <= target", ratio <= 1.0, f"{ratio:.3f} of the target")
+            add("size >= 85 % of the target", ratio >= 0.85, f"{ratio:.3f} of the target")
+            log = open(os.path.join(d, "log.txt"), encoding="utf-8", errors="replace").read()
+            add("settings applied", "speed fast (preset veryfast), 720p at most, audio 128 kbps per track, surround kept"
+                in log, "see log.txt")
     elif name == "compress-avi-copy-shortcut":
         no_errors()
         out = output(r"megamind_compressed\.mkv$")

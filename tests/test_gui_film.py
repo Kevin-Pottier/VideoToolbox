@@ -2,12 +2,16 @@
 import pytest
 
 import gui_film
+from compression import CompressionSettings
+
+SETTINGS = CompressionSettings(speed="fast", max_height=720, audio_kbps=128)
 
 
 @pytest.fixture
 def workflow(monkeypatch):
     """Runs run_video_compression with the given answers; returns the run_compression calls and the errors shown."""
-    def run(files, subtitles=("none", None), container="mp4", encoder="libx264", size=1.5, failure=None):
+    def run(files, subtitles=("none", None), container="mp4", encoder="libx264", size=1.5, failure=None,
+            settings=SETTINGS):
         calls, errors = [], []
 
         def compress(*args, **kwargs):
@@ -18,6 +22,7 @@ def workflow(monkeypatch):
         monkeypatch.setattr(gui_film, "ask_subtitles", lambda path: subtitles)
         monkeypatch.setattr(gui_film, "ask_container", lambda *args: container)
         monkeypatch.setattr(gui_film, "choose_encoder", lambda *args: encoder)
+        monkeypatch.setattr(gui_film, "ask_compression_settings", lambda encoder, paths: settings)
         monkeypatch.setattr(gui_film, "ask_max_size", lambda *args: size)
         monkeypatch.setattr(gui_film, "run_compression", compress)
         monkeypatch.setattr(gui_film, "show_message", lambda kind, title, message: errors.append(message))
@@ -29,17 +34,17 @@ def workflow(monkeypatch):
 
 def test_a_video_without_subtitles_is_compressed(workflow):
     calls, errors = workflow(("film.mkv",))
-    assert calls == [(("film.mkv", "none", None, "mp4", 1.5), {"encoder": "libx264"})]
+    assert calls == [(("film.mkv", "none", None, "mp4", 1.5), {"encoder": "libx264", "settings": SETTINGS})]
     assert errors == []
 
 
 def test_the_subtitle_file_is_passed_on(workflow):
     calls, errors = workflow(("film.mkv",), subtitles=("soft", "film.srt"), container="mkv")
-    assert calls == [(("film.mkv", "soft", "film.srt", "mkv", 1.5), {"encoder": "libx264"})]
+    assert calls == [(("film.mkv", "soft", "film.srt", "mkv", 1.5), {"encoder": "libx264", "settings": SETTINGS})]
     assert errors == []
 
 
-@pytest.mark.parametrize("answers", [{"encoder": None}, {"size": None}])
+@pytest.mark.parametrize("answers", [{"encoder": None}, {"settings": None}, {"size": None}])
 def test_cancelling_a_dialog_compresses_nothing(workflow, answers):
     calls, _ = workflow(("film.mkv",), **answers)
     assert calls == []

@@ -47,7 +47,7 @@ Modern, user-friendly Python GUI for compressing or upscaling one or multiple vi
    python main.py
    ```
 4. Choose a mode:
-   - **Video Compression**: Select one or more videos, configure subtitles, output format, encoder (see [Video encoders](#video-encoders)) and size. With x264/x265 the video is encoded in two passes (an analysis pass, then the real encode) so that the file ends up just under the requested size. Every audio track is kept (re-encoded to stereo AAC at 192 kbps each, counted in the size), French tracks first and default, as well as the subtitle tracks of the source (in MP4, only the text ones); added soft subtitles become the first, default subtitle track. A file that is already under the requested size is only remuxed (streams copied in a few seconds, no quality loss, original audio kept). If the compression cannot be done (size too small, with the smallest possible size for the video, unreadable file, ffmpeg error), a message says why. Batch mode shows a scrollable window with per-file progress and ETA.
+   - **Video Compression**: Select one or more videos, configure subtitles, output format, encoder (see [Video encoders](#video-encoders)), settings and size. The settings: the speed / quality trade-off (Fast, Balanced, Best quality: the preset of the encoder), a maximum resolution (1080p, 720p or 480p at most: for a small size, a lower resolution gives a sharper picture than a full resolution starved of bitrate; smaller videos keep their own) and the audio (bitrate per track from 96 to 256 kbps, and the 5.1/7.1 surround kept at twice the bitrate, or down-mixed to stereo). The defaults (Balanced, resolution kept, 192 kbps stereo) are the former fixed values. With x264/x265 the video is encoded in two passes (an analysis pass, then the real encode) so that the file ends up just under the requested size. Every audio track is kept (re-encoded to stereo AAC at 192 kbps each, counted in the size), French tracks first and default, as well as the subtitle tracks of the source (in MP4, only the text ones); added soft subtitles become the first, default subtitle track. A file that is already under the requested size is only remuxed (streams copied in a few seconds, no quality loss, original audio kept). If the compression cannot be done (size too small, with the smallest possible size for the video, unreadable file, ffmpeg error), a message says why. Batch mode shows a scrollable window with per-file progress and ETA.
    - **Video Upscaling (Real-ESRGAN)**: Select one or more videos to upscale, the target resolution (720p, 1080p, 4K), the model and the encoder:
      - **Live action** (`realesrgan-x4plus`): the best quality, slow (x4, then resized to the target height). From a 1080p source, each frame is computed at 7680x4320: with an integrated GPU it takes minutes per frame, far too long for a movie: prefer the animation model or a dedicated graphics card.
      - **Animation** (`realesr-animevideov3`): about 10 times faster, designed for cartoons and anime, with native x2/x3/x4 networks (the smallest one that reaches the target is used).
@@ -70,6 +70,18 @@ The compression asks which encoder to use. Only the encoders that work on the co
 | **H.264 - GPU** | graphics card | very fast | good (slightly below x264 on older cards) | approximate (1 pass) | everything |
 | **HEVC - GPU** | graphics card | very fast | better than H.264 | approximate (1 pass) | most devices since ~2016, VLC |
 | **AV1 - GPU** | recent graphics card | very fast | best | approximate (1 pass) | recent devices, VLC |
+
+Presets used for the speed / quality setting of the compression (Balanced was the only one before):
+
+| Encoder | Fast | Balanced | Best quality |
+|---|---|---|---|
+| x264 | veryfast | medium | slower |
+| x265 | veryfast | medium | slow |
+| SVT-AV1 | preset 10 | preset 8 | preset 6 |
+| NVIDIA NVENC | p3 | p5 | p7 |
+| AMD AMF | speed | balanced | quality |
+| Intel Quick Sync | faster | slow | veryslow |
+| VAAPI, Apple VideoToolbox | no preset: the three are the same | | |
 
 "Approximate" means the size is usually within a few % of the target (a 5% margin is kept); two passes hit it precisely (2% margin).
 
@@ -130,8 +142,8 @@ In these runs the output never exceeded the target. A file already under the tar
 ### Repository and tests
 
 - Fresh clone: **74 MB → 0.18 MB** (the Real-ESRGAN binaries and models are downloaded by `scripts/fetch_deps.py` instead of being versioned).
-- 187 automated tests (unit, real FFmpeg on generated videos, compression workflow without display), run by GitHub Actions on Linux (Python 3.9 and 3.13) and Windows: they cover 74 % of the processing code (compression, encoders, audio, subtitles); the windows are covered by the end-to-end battery below.
-- End-to-end battery (`tests/e2e/run.py`, see [Development](#development)): 23 scenarios driven through the real windows from the main menu, on real footage: compression (no subtitles, soft, burned, MP4 and MKV, x264/x265/SVT-AV1, copy shortcut, batch, invalid and too small sizes, cancellation), translation (single and batch with a stand-in for Google, which refuses the requests of a cloud machine, invalid file, Google refusing the requests), upscaling with the real Real-ESRGAN (both models, refusal at the disk space question), audio fix, add subtitles (soft, burned, DivX AVI, batch) and audio tracks management. It found three of the bugs fixed in October 2026 (see the changelog).
+- 202 automated tests (unit, real FFmpeg on generated videos, compression workflow without display), run by GitHub Actions on Linux (Python 3.9 and 3.13) and Windows: they cover 74 % of the processing code (compression, encoders, audio, subtitles); the windows are covered by the end-to-end battery below.
+- End-to-end battery (`tests/e2e/run.py`, see [Development](#development)): 24 scenarios driven through the real windows from the main menu, on real footage: compression (no subtitles, soft, burned, MP4 and MKV, x264/x265/SVT-AV1, settings, copy shortcut, batch, invalid and too small sizes, cancellation), translation (single and batch with a stand-in for Google, which refuses the requests of a cloud machine, invalid file, Google refusing the requests), upscaling with the real Real-ESRGAN (both models, refusal at the disk space question), audio fix, add subtitles (soft, burned, DivX AVI, batch) and audio tracks management. It found three of the bugs fixed in October 2026 (see the changelog).
 
 ## Major Changes
 - Unified single and batch video compression into one workflow.
@@ -199,6 +211,7 @@ You can create a standalone `.exe` for easy sharing and use on Windows:
 
 
 ### October 2026
+- Compression settings ([issue #2](https://github.com/Kevin-Pottier/VideoToolbox/issues/2)): speed / quality (the preset of each encoder), maximum resolution, audio bitrate per track and 5.1/7.1 kept or down-mixed to stereo; the size budget follows the audio choices. A file already under the target that must be reduced in resolution (or get burned subtitles) is encoded at the bitrate of the source at most, never bigger.
 - Compression without subtitles works again: it stopped with "Unable to determine the subtitle file" (regression of the PyCharm warnings fix).
 - Compression keeps every audio track, French first and default, whatever the subtitle option: without subtitles or with burned ones, ffmpeg kept a single track (the English one of a VF/VO movie). The subtitle tracks of the source are kept too.
 - Compression errors are shown in a message box (they were only printed in the console, the window closed as if everything had worked); batch mode lists the failed videos.

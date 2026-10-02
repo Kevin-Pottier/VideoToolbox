@@ -50,6 +50,20 @@ ENCODERS = [
 BY_NAME = {encoder.name: encoder for encoder in ENCODERS}
 DEFAULT = BY_NAME["libx264"]
 
+# Speed / quality levels offered to the user, and the preset of each encoder for them (by ffmpeg encoder
+# name, or by GPU family). "balanced" is what the compression used before the choice existed (AMD aside:
+# its "balanced" quality level replaces "quality", which is now the third level). VAAPI and Apple
+# VideoToolbox have no such preset.
+SPEEDS = ("fast", "balanced", "quality")
+PRESETS = {
+    "libx264": ("veryfast", "medium", "slower"),
+    "libx265": ("veryfast", "medium", "slow"),
+    "libsvtav1": ("10", "8", "6"),
+    "NVIDIA": ("p3", "p5", "p7"),
+    "AMD": ("speed", "balanced", "quality"),
+    "Intel": ("faster", "slow", "veryslow"),
+}
+
 # Bits per pixel used when a quality level is given as a bitrate (GPU encoders, see quality_args):
 # generous values, close to a Blu-ray, so that the encoder is not the limiting factor.
 QUALITY_BITS_PER_PIXEL = {"H.264": 0.12, "HEVC": 0.08, "AV1": 0.06}
@@ -77,25 +91,31 @@ def _codec_args(encoder):
     return args
 
 
-def bitrate_args(encoder, kbps):
-    """Encode at an average bitrate (kbps), for a target file size. Two-pass encoders add -pass themselves."""
+def preset(encoder, speed="balanced"):
+    """Preset of the encoder for the speed level (see SPEEDS), or None when the encoder has none."""
+    levels = PRESETS.get(encoder.name) or PRESETS.get(encoder.hardware)
+    return levels[SPEEDS.index(speed)] if levels else None
+
+
+def bitrate_args(encoder, kbps, speed="balanced"):
+    """
+    Encode at an average bitrate (kbps), for a target file size, with the preset of the speed level.
+    Two-pass encoders add -pass themselves.
+    """
     rate = [f"{kbps}k"]
     peaks = ["-maxrate", f"{2 * kbps}k", "-bufsize", f"{4 * kbps}k"]
     name, hw = encoder.name, encoder.hardware
-    if name == "libx264":
-        extra = ["-preset", "medium", "-b:v", *rate]
-    elif name == "libx265":
-        extra = ["-preset", "medium", "-b:v", *rate]
-    elif name == "libsvtav1":
-        extra = ["-preset", "8", "-b:v", *rate]
+    level = preset(encoder, speed)
+    if name in ("libx264", "libx265", "libsvtav1"):
+        extra = ["-preset", level, "-b:v", *rate]
     elif hw == "NVIDIA":
-        # p5 + hq + two passes per frame: the best quality presets of NVENC that stay fast
-        extra = ["-preset", "p5", "-tune", "hq", "-rc", "vbr", "-multipass", "fullres", "-spatial-aq", "1",
+        # hq + two passes per frame: the best quality settings of NVENC that stay fast
+        extra = ["-preset", level, "-tune", "hq", "-rc", "vbr", "-multipass", "fullres", "-spatial-aq", "1",
                  "-b:v", *rate, *peaks]
     elif hw == "AMD":
-        extra = ["-quality", "quality", "-rc", "vbr_peak", "-b:v", *rate, *peaks]
+        extra = ["-quality", level, "-rc", "vbr_peak", "-b:v", *rate, *peaks]
     elif hw == "Intel":
-        extra = ["-preset", "slow", "-b:v", *rate, *peaks]
+        extra = ["-preset", level, "-b:v", *rate, *peaks]
     elif hw == "VAAPI":
         extra = ["-rc_mode", "VBR", "-b:v", *rate, *peaks]
     else:  # Apple VideoToolbox
