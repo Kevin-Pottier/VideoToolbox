@@ -86,7 +86,7 @@ SCENARIOS = {
     "upscale-x4plus-1080p-x265": dict(inputs=["megamind_small.mkv"], videos=["megamind_small.mkv"], outdir="out",
         upscale=True, plan=menu("Upscale video", ["1080p"], ["Live action", "OK"], [X265, "OK"])),
     "upscale-refused-at-the-disk-space-question": dict(inputs=["megamind_small.mkv"], videos=["megamind_small.mkv"],
-        outdir="out", upscale=True, refuse=["Temporary disk space", "Not enough disk space"],
+        outdir="out", upscale=True, refuse=["Upscaling", "Not enough disk space"],
         plan=menu("Upscale video", ["1080p"], ["Animation", "OK"], [X264, "OK"])),
     # ---- Audio conversion (the video copied, French first)
     "audio-conversion-default": dict(inputs=["film.mkv"], videos=["film.mkv"],
@@ -315,13 +315,14 @@ def check(name, sc, d, result, new):
         add("error reported, nothing written", any(e[1] == "Translation Error" for e in errors) and not new, str(errors)[:200])
     elif name == "upscale-refused-at-the-disk-space-question":
         questions = [e for e in result["events"] if e[0] == "askyesno"]
-        add("temporary disk space announced", questions and re.search(r"needs about [\d.]+ [MG]B", questions[0][2]),
-            questions[0][2] if questions else "")
+        add("duration and temporary disk space announced", questions and "Estimated duration" in questions[0][2]
+            and re.search(r"Temporary disk space: about [\d.]+ [MG]B", questions[0][2]), questions[0][2] if questions else "")
         add("nothing written", not [f for f in new if f.startswith("out")], str(new))
     elif name.startswith("upscale-"):
         no_errors()
         questions = [e for e in result["events"] if e[0] == "askyesno"]
-        add("temporary disk space announced", questions and questions[0][1] == "Temporary disk space")
+        add("duration and temporary disk space announced", questions and questions[0][1] == "Upscaling"
+            and "Estimated duration" in questions[0][2], questions[0][2] if questions else "")
         target = int(re.search(r"(\d+)p-", name).group(1))
         out = output(rf"_upscaled_{target}p\.mkv$")
         if out:

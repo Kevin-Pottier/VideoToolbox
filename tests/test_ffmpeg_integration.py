@@ -198,12 +198,18 @@ def test_probe_video_reads_size_rate_and_duration(tmp_path):
 
 
 FAKE_REALESRGAN = '''#!{python}
-"""Stand-in for realesrgan-ncnn-vulkan: scales every frame of -i into -o (same name, -f format)."""
-import os, subprocess, sys
+"""Stand-in for realesrgan-ncnn-vulkan: scales every frame of -i into -o (same name, -f format).
+With FAKE_REALESRGAN_TILE_DELAY, it prints the progress of 4 tiles per frame like the real one (a line
+when each tile starts), each tile taking that many seconds."""
+import os, subprocess, sys, time
 args = dict(zip(sys.argv[1::2], sys.argv[2::2]))
 if os.environ.get("FAKE_REALESRGAN_FAIL"):
     sys.exit("vkCreateInstance failed")
+delay = float(os.environ.get("FAKE_REALESRGAN_TILE_DELAY", "0"))
 for name in sorted(os.listdir(args["-i"])):
+    for tile in range(4 if delay else 0):
+        print("{{:.2f}}%".format(tile * 25), file=sys.stderr, flush=True)
+        time.sleep(delay)
     out = os.path.join(args["-o"], os.path.splitext(name)[0] + "." + args["-f"])
     subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", os.path.join(args["-i"], name), "-q:v", "2",
                     "-vf", "scale=iw*{{0}}:ih*{{0}}".format(args["-s"]), out], check=True)
@@ -602,3 +608,32 @@ def test_hdr10_converted_to_sdr_for_h264(hdr10_clip):
     out = compression.run_compression(hdr10_clip, "none", None, "mkv", os.path.getsize(hdr10_clip) / 2 / 1024 ** 3,
                                       gui_progress=noop)
     assert video_colors(out) == ("h264", "yuv420p", "bt709", "bt709")
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="the fake Real-ESRGAN is a Python script with a shebang")
+def test_the_speed_of_realesrgan_is_measured_from_the_tiles(tmp_path, fake_realesrgan, monkeypatch):
+    gui_upscale = fake_realesrgan
+    monkeypatch.setenv("FAKE_REALESRGAN_TILE_DELAY", "0.25")  # 4 tiles: 1 s per frame
+    src = anamorphic_clip(tmp_path)
+    speed = gui_upscale.measure_speed(str(src), gui_upscale.probe_video(str(src)), gui_upscale.MODELS[0], 4)
+    assert 0.9 < speed < 1.6
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="the fake Real-ESRGAN is a Python script with a shebang")
+def test_a_slow_measure_stops_at_the_timeout_with_the_tiles_done(tmp_path, fake_realesrgan, monkeypatch):
+    # A frame taking minutes (1080p x4 on an integrated GPU): the finished tiles give the speed
+    gui_upscale = fake_realesrgan
+    monkeypatch.setenv("FAKE_REALESRGAN_TILE_DELAY", "1")  # 4 s per frame
+    src = anamorphic_clip(tmp_path)
+    start = time.time()
+    speed = gui_upscale.measure_speed(str(src), gui_upscale.probe_video(str(src)), gui_upscale.MODELS[0], 4, timeout=3.5)
+    assert time.time() - start < 6
+    assert 3.5 < speed < 5
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="the fake Real-ESRGAN is a Python script with a shebang")
+def test_no_speed_when_realesrgan_fails(tmp_path, fake_realesrgan, monkeypatch):
+    gui_upscale = fake_realesrgan
+    monkeypatch.setenv("FAKE_REALESRGAN_FAIL", "1")
+    src = anamorphic_clip(tmp_path)
+    assert gui_upscale.measure_speed(str(src), gui_upscale.probe_video(str(src)), gui_upscale.MODELS[0], 4) is None

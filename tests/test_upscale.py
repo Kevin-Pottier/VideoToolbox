@@ -91,25 +91,52 @@ def test_format_size(size, expected):
     assert gu._format_size(size) == expected
 
 
-@pytest.mark.parametrize("answer", [True, False])
-def test_the_temporary_space_is_always_announced_and_can_be_refused(monkeypatch, answer):
+def ask(monkeypatch, answer=True):
     questions = []
     monkeypatch.setattr(gu.messagebox, "askyesno", lambda title, message, **options: questions.append(
         (title, message, options)) or answer)
-    assert gu.confirm_temp_space(None, 3.5e9, 120e9, "D:/Films") is answer
+    return questions
+
+
+@pytest.mark.parametrize("answer", [True, False])
+def test_the_duration_and_the_temporary_space_are_announced_and_can_be_refused(monkeypatch, answer):
+    questions = ask(monkeypatch, answer)
+    assert gu.confirm_start(None, 3.5e9, 120e9, "D:/Films", 3 * 3600 + 20 * 60) is answer
     [(title, message, options)] = questions
-    assert title == "Temporary disk space" and options["icon"] == "question" and options["default"] == "yes"
+    assert title == "Upscaling" and options["icon"] == "question" and options["default"] == "yes"
+    assert "Estimated duration: about 3 h 20 min (measured on this computer)" in message
     assert "about 3.5 GB" in message and "D:/Films" in message and "Free space: 120.0 GB" in message
+    assert "animation model" not in message
+
+
+def test_unknown_duration_and_advice(monkeypatch):
+    questions = ask(monkeypatch)
+    gu.confirm_start(None, 3.5e9, 120e9, "D:/Films", None, advice=True)
+    [(_, message, _)] = questions
+    assert "Estimated duration: unknown" in message and "animation model is about 10 times faster" in message
 
 
 def test_not_enough_space_is_a_warning_answered_no_by_default(monkeypatch):
-    questions = []
-    monkeypatch.setattr(gu.messagebox, "askyesno", lambda title, message, **options: questions.append(
-        (title, message, options)) or False)
-    assert not gu.confirm_temp_space(None, 3.5e9, 2e9, "D:/Films")
+    questions = ask(monkeypatch, False)
+    assert not gu.confirm_start(None, 3.5e9, 2e9, "D:/Films", 600)
     [(title, message, options)] = questions
     assert title == "Not enough disk space" and options["icon"] == "warning" and options["default"] == "no"
     assert "not enough" in message
+
+
+@pytest.mark.parametrize("seconds, expected", [(20, "less than a minute"), (40 * 60, "about 40 min"),
+                                               (3 * 3600 + 5 * 60, "about 3 h 05 min"), (235 * 3600, "about 9 days 19 h")])
+def test_human_duration(seconds, expected):
+    assert gu._human_duration(seconds) == expected
+
+
+def test_estimate_scales_with_the_frames_and_the_upscaled_pixels():
+    anime = next(m for m in gu.MODELS if m.name == "realesr-animevideov3")
+    dvd = {"width": 720, "height": 480, "duration": 100.0, "fps": "25/1"}         # 2500 frames, x2 for 720p
+    small = {"width": 360, "height": 240, "duration": 10.0, "fps": "25/1"}        # 250 frames, x3 for 720p
+    jobs = [("dvd.mkv", dvd, 720), ("small.mkv", small, 720)]
+    # 2 s per frame of the first video; a frame of the second has (360x240x9)/(720x480x4) = 9/16 of its pixels
+    assert gu.estimate_seconds(jobs, anime, 2.0) == pytest.approx(2500 * 2 + 250 * 2 * 9 / 16)
 
 
 @pytest.mark.parametrize("seconds, expected", [(0, "00:00"), (59, "00:59"), (3599, "59:59"), (3725, "1:02:05"),

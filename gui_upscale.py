@@ -114,20 +114,146 @@ def _format_size(size):
     return f"{size / 1e9:.1f} GB" if size >= 1e9 else f"{max(size, 1e6) / 1e6:.0f} MB"
 
 
-def confirm_temp_space(root, needed, free, outdir):
+def _human_duration(seconds):
+    """An estimated duration for a sentence: "about 40 min", "about 3 h 20 min", "about 4 days 7 h"."""
+    minutes = int(seconds // 60)
+    if minutes < 1:
+        return "less than a minute"
+    if minutes < 60:
+        return f"about {minutes} min"
+    hours, minutes = divmod(minutes, 60)
+    if hours < 48:
+        return f"about {hours} h {minutes:02d} min"
+    return f"about {hours // 24} days {hours % 24} h"
+
+
+# A duration from which the advice to choose the faster model or a simple resize is given
+LONG_UPSCALE = 6 * 3600
+
+
+def confirm_start(root, needed, free, outdir, duration=None, advice=False):
     """
-    Tell how much temporary disk space the upscaling needs, and let the user decide whether to start.
+    Tell how long the upscaling should take (duration in seconds, None if it could not be measured) and how
+    much temporary disk space it needs, and let the user decide whether to start. advice: the live action
+    model on an HD source takes very long, the faster model or a simple resize is suggested.
     When the folder has not enough free space, the question is a warning and "No" is the default answer.
     Returns True to start the upscaling.
     """
     enough = needed <= free
-    message = (f"The upscaling needs about {_format_size(needed)} of temporary disk space (frames deleted at the "
-               f"end), plus the upscaled videos, in:\n{outdir}\n\nFree space: {_format_size(free)}.")
+    message = (f"Estimated duration: {_human_duration(duration)} (measured on this computer)."
+               if duration else "Estimated duration: unknown (the speed could not be measured).")
+    if advice:
+        message += ("\nThe animation model is about 10 times faster, and from an HD source the AI brings little "
+                    "over a simple resize.")
+    message += (f"\n\nTemporary disk space: about {_format_size(needed)} (frames deleted at the end), plus the "
+                f"upscaled videos, in:\n{outdir}\nFree space: {_format_size(free)}.")
     if not enough:
         message += "\n\n⚠ This is not enough: the upscaling will probably fail when the disk is full."
-    return messagebox.askyesno("Temporary disk space" if enough else "Not enough disk space",
+    return messagebox.askyesno("Upscaling" if enough else "Not enough disk space",
                                message + "\n\nStart the upscaling?", icon="question" if enough else "warning",
                                default="yes" if enough else "no", parent=root)
+
+
+CALIBRATION_FRAMES = 3  # copies of a frame upscaled to measure the speed
+CALIBRATION_TIMEOUT = 45  # seconds: the measure stops there, with the tiles finished so far
+
+
+def measure_speed(filepath, info, model, scale, cancel_event=None, timeout=CALIBRATION_TIMEOUT):
+    """
+    Seconds Real-ESRGAN takes per frame of this video with this model and scale, on this computer: copies of a
+    frame from the middle of the video are upscaled, and the speed is measured from the first finished tile
+    (the loading of the model does not count). None when it cannot be measured (Real-ESRGAN failed, or nothing
+    finished before the timeout, or cancel_event set).
+    """
+    work_dir = tempfile.mkdtemp(prefix="videotoolbox_speed_")
+    proc = None
+    try:
+        frames_dir, upscaled_dir = os.path.join(work_dir, "in"), os.path.join(work_dir, "out")
+        os.makedirs(frames_dir)
+        os.makedirs(upscaled_dir)
+        first = os.path.join(frames_dir, "frame_1.png")
+        subprocess.run(["ffmpeg", "-nostdin", "-v", "error", "-y", "-ss", f"{(info.get('duration') or 0) / 2:.3f}",
+                        "-i", filepath, "-map", "0:v:0", "-frames:v", "1", "-vf", "scale=trunc(iw*sar/2)*2:ih,setsar=1",
+                        first], capture_output=True)
+        if not os.path.exists(first):
+            return None
+        for number in range(2, CALIBRATION_FRAMES + 1):
+            shutil.copyfile(first, os.path.join(frames_dir, f"frame_{number}.png"))
+        log_path = os.path.join(work_dir, "upscale.log")
+        with open(log_path, "w", encoding="utf-8") as log:
+            proc = subprocess.Popen([REALESRGAN_EXE, "-i", frames_dir, "-o", upscaled_dir, "-n", model.name,
+                                     "-s", str(scale), "-f", "jpg", "-m", os.path.join(TOOL_DIR, "models")],
+                                    stdout=subprocess.DEVNULL, stderr=log)
+        start = time.monotonic()
+        first_seen = last_seen = None  # (time, frames done)
+        while True:
+            with open(log_path, encoding="utf-8", errors="replace") as log:
+                done = frames_done(log.read(), len(os.listdir(upscaled_dir)))
+            now = time.monotonic()
+            if done > 0 and (last_seen is None or done > last_seen[1]):
+                first_seen = first_seen or (now, done)
+                last_seen = (now, done)
+            if proc.poll() is not None or now - start > timeout or (cancel_event and cancel_event.is_set()):
+                break
+            time.sleep(0.1)
+        if last_seen and last_seen[1] > first_seen[1]:
+            return (last_seen[0] - first_seen[0]) / (last_seen[1] - first_seen[1])
+        if proc.returncode == 0 and len(os.listdir(upscaled_dir)) == CALIBRATION_FRAMES:
+            # Every frame finished between two looks (a fast GPU): the whole run, the loading included
+            return (time.monotonic() - start) / CALIBRATION_FRAMES
+        return None
+    finally:
+        if proc and proc.poll() is None:
+            proc.kill()
+            proc.wait()
+        shutil.rmtree(work_dir, ignore_errors=True)
+
+
+def estimate_seconds(jobs, model, seconds_per_frame):
+    """
+    Duration of the upscaling of every job, from the speed measured on the first one: the time of a frame
+    grows with the number of upscaled pixels (width x height x scale²).
+    """
+    def pixels(info, target_height):
+        return info["width"] * info["height"] * model_scale(model, info["height"], target_height) ** 2
+    reference = pixels(jobs[0][1], jobs[0][2])
+    return sum(estimate_frame_count(info) * seconds_per_frame * pixels(info, target_height) / reference
+               for _, info, target_height in jobs)
+
+
+def _measure_with_window(root, filepath, info, model, scale):
+    """measure_speed with a small window ("Measuring..."); closing it skips the measure (None)."""
+    win = tk.Toplevel(root)
+    win.title("Upscaling speed")
+    win.configure(bg="#23272e")
+    apply_modern_theme(win)
+    frame = create_styled_frame(win)
+    frame.pack(fill="both", expand=True, padx=14, pady=14)
+    create_styled_label(frame, f"Measuring the speed of Real-ESRGAN on this computer\n"
+                               f"({model.name}, a frame of {os.path.basename(filepath)})...").pack()
+    bar = ttk.Progressbar(frame, mode="indeterminate", length=320)
+    bar.pack(pady=8)
+    bar.start(15)
+    cancel = threading.Event()
+    result = {}
+
+    def worker():
+        result["speed"] = measure_speed(filepath, info, model, scale, cancel)
+
+    def poll():
+        if thread.is_alive():
+            win.after(200, poll)
+        else:
+            win.destroy()
+
+    def on_close():
+        cancel.set()
+    win.protocol("WM_DELETE_WINDOW", on_close)
+    thread = threading.Thread(target=worker, daemon=True)
+    thread.start()
+    poll()
+    win.wait_window()
+    return result.get("speed")
 
 
 def _format_duration(seconds):
@@ -624,7 +750,15 @@ def _run_video_upscale(root):
                  for _, info, target_height in jobs)
     free = shutil.disk_usage(outdir).free
     print(f"Estimated temporary disk space: {_format_size(needed)} (free: {_format_size(free)})")
-    if not confirm_temp_space(root, needed, free, outdir):
+    # Duration: Real-ESRGAN is measured on a frame of the first video, the others follow their size
+    filepath, info, target_height = jobs[0]
+    seconds_per_frame = _measure_with_window(root, filepath, info, model, model_scale(model, info["height"], target_height))
+    duration = estimate_seconds(jobs, model, seconds_per_frame) if seconds_per_frame else None
+    if duration:
+        print(f"Measured speed: {seconds_per_frame:.2f} s per frame, estimated duration: {_human_duration(duration)}")
+    advice = bool(duration and duration > LONG_UPSCALE and not model.name.startswith("realesr-anime")
+                  and any(info["height"] >= 720 for _, info, _ in jobs))
+    if not confirm_start(root, needed, free, outdir, duration, advice):
         print("Upscaling cancelled.")
         return
 
