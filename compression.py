@@ -16,6 +16,7 @@ from colorama import Fore, Style
 from audio_tracks import MP4_CONVERTIBLE_SUBTITLE_CODECS, ffprobe_streams, french_default_dispositions, french_first
 import audio_codecs
 import encoders
+import hdr
 from utils import COPY_INPUT_FLAGS, fps_mode_option, prepare_subtitle_file
 import subprocess
 # Import reusable GUI helpers for modern, DRY window/dialog creation
@@ -50,6 +51,7 @@ class CompressionSettings:
     audio_kbps: int = AUDIO_BITRATE // 1000  # per stereo or mono track
     keep_surround: bool = False       # keep 5.1/7.1 tracks (at twice the bitrate) instead of the stereo down-mix
     audio_codec: str = "aac"          # AUDIO_CODECS, or COPY_AUDIO to keep the original audio
+    hdr_to_sdr: bool = False          # convert an HDR video to SDR even with an HEVC/AV1 encoder (see hdr_mode)
 
     def audio(self):
         """The audio choices for audio_codecs (not for COPY_AUDIO)."""
@@ -63,7 +65,8 @@ class CompressionSettings:
             audio = (f"audio {self.audio_codec.upper()} {self.audio_kbps} kbps per track"
                      + (", surround kept" if self.keep_surround else ", stereo"))
         return (f"speed {self.speed}" + (f" (preset {level})" if level else "")
-                + (f", {self.max_height}p at most" if self.max_height else "") + f", {audio}")
+                + (f", {self.max_height}p at most" if self.max_height else "") + f", {audio}"
+                + (", HDR to SDR" if self.hdr_to_sdr else ""))
 
 
 DEFAULT_SETTINGS = CompressionSettings()
@@ -99,6 +102,18 @@ def source_audio_bitrates(file_path, media):
                 sizes[int(fields[0])] += int(fields[1])
         measured = {index: int(size * 8 / media.duration) for index, size in sizes.items()}
     return [track.bit_rate or measured.get(track.stream_index, 0) for track in tracks]
+
+
+def hdr_mode(media, encoder, settings=DEFAULT_SETTINGS, burn_subtitles=False):
+    """
+    What happens to an HDR video: "keep" (10 bits, color tags and metadata, with an HEVC or AV1 encoder) or
+    "sdr" (tone mapped to BT.709: with H.264, with burned subtitles, which would be blinding in HDR, or on
+    request). None for an SDR video.
+    """
+    video = media.video_tracks[0] if media.video_tracks else None
+    if not video or not video.is_hdr:
+        return None
+    return "sdr" if settings.hdr_to_sdr or burn_subtitles or encoder.codec == "H.264" else "keep"
 
 
 def scaled_height(media, settings=DEFAULT_SETTINGS):
@@ -223,8 +238,23 @@ def run_compression(file_path, sub_option, sub_file, ext, max_size_gb, gui_progr
             # The file was already small enough: no need to make it bigger than the source
             source_kbps = int(os.path.getsize(file_path) * 8 / duration / 1000)
             video_bitrate_kbps = min(video_bitrate_kbps, max(source_kbps, MIN_VIDEO_BITRATE_KBPS))
+        metadata = None
+        mode = hdr_mode(media, encoder, settings, sub_option == "hard" and bool(sub_path))
+        if mode:
+            video = media.video_tracks[0]
+            if video.dv_profile == 5:
+                raise CompressionError("This video is Dolby Vision profile 5, without an HDR10 base: its colors cannot "
+                                       "be converted here (they would be wrong).")
+            if mode == "sdr" and not hdr.has_zscale():
+                raise CompressionError("This video is HDR: converting it to SDR needs an FFmpeg with the zscale filter "
+                                       "(zimg), such as the builds of gyan.dev. Or choose an HEVC or AV1 encoder, which "
+                                       "keeps the HDR.")
+            if mode == "keep" and video.color_transfer == hdr.PQ:
+                metadata = hdr.read_static_metadata(input_path)
+            print(Fore.YELLOW + ("HDR video: kept in 10 bits" + (" with its HDR10 metadata" if metadata else "")
+                                 if mode == "keep" else "HDR video: converted to SDR") + Style.RESET_ALL)
         passes = build_encode_commands(input_path, output_path, ext, video_bitrate_kbps, sub_option, sub_path, work_dir,
-                                       media, fps_mode_option(), encoder, settings)
+                                       media, fps_mode_option(), encoder, settings, metadata)
         print(Fore.YELLOW + f"\nRunning ffmpeg ({encoder.label}, {len(passes)} pass(es)) with subtitles option: "
               f"{sub_option}\n" + Style.RESET_ALL)
         run(passes, _GPU_SESSIONS if encoder.hardware else contextlib.nullcontext())
@@ -280,7 +310,8 @@ def audio_args(media, settings=DEFAULT_SETTINGS):
 
 
 def build_encode_commands(input_path, output_path, ext, video_bitrate_kbps, sub_option, sub_path, work_dir, media,
-                          fps_mode="-fps_mode", encoder=encoders.DEFAULT, settings=DEFAULT_SETTINGS):
+                          fps_mode="-fps_mode", encoder=encoders.DEFAULT, settings=DEFAULT_SETTINGS,
+                          hdr_metadata=None):
     """
     ffmpeg commands that encode the video at the bitrate that fits the target size.
     Two-pass encoders (x264, x265) first analyse the video, then use these statistics to distribute
@@ -289,11 +320,13 @@ def build_encode_commands(input_path, output_path, ext, video_bitrate_kbps, sub_
     the MP4 output of the second pass can duplicate a frame that the first pass did not analyse
     (x264 then fails with "Incomplete MB-tree stats file" or even hangs).
     media is the audio_tracks.MediaFileInfo of the input, fps_mode the option name given by utils.fps_mode_option(),
-    settings the CompressionSettings (preset, maximum height, audio).
+    settings the CompressionSettings (preset, maximum height, audio), hdr_metadata the hdr.StaticMetadata of
+    an HDR10 source whose HDR is kept (see hdr_mode).
     Returns:
         list: (command, share of the total work) for each pass.
     """
-    filters = []
+    mode = hdr_mode(media, encoder, settings, sub_option == "hard" and bool(sub_path))
+    filters = [hdr.TONEMAP_FILTER] if mode == "sdr" else []
     height = scaled_height(media, settings)
     if height:
         filters.append(f"scale=-2:{height}:flags=lanczos")  # the width follows (even), the aspect ratio is kept
@@ -301,8 +334,18 @@ def build_encode_commands(input_path, output_path, ext, video_bitrate_kbps, sub_
         # After the resize: the subtitles are drawn at the output resolution, sharp.
         # Plain relative subtitle name, resolved in the working directory: no filter escaping needed
         filters.append(f"subtitles={os.path.basename(sub_path)}")
-    video_args = [*encoders.filter_args(encoder, filters), fps_mode, "passthrough",
+    video_args = [*encoders.filter_args(encoder, filters, ten_bit=mode == "keep"), fps_mode, "passthrough",
                   *encoders.bitrate_args(encoder, video_bitrate_kbps, settings.speed)]
+    x265_hdr = []
+    if mode == "keep":
+        video = media.video_tracks[0]
+        video_args += [*encoders.ten_bit_args(encoder), *hdr.tags(video)]
+        if encoder.name == "libx265":
+            x265_hdr = hdr.x265_params(video, hdr_metadata)
+        elif encoder.name == "libsvtav1":
+            video_args += hdr.svtav1_params(hdr_metadata)
+    elif mode == "sdr":
+        video_args += hdr.SDR_TAGS
     hw_input = encoders.input_args(encoder)
     soft = sub_option == "soft" and bool(sub_path)
     inputs = [*hw_input, "-i", input_path, *(["-i", sub_path] if soft else [])]
@@ -315,7 +358,7 @@ def build_encode_commands(input_path, output_path, ext, video_bitrate_kbps, sub_
     def pass_args(number):
         if encoder.name == "libx265":
             # Relative statistics file, in the working directory: x265-params uses ':' as separator
-            return ["-x265-params", f"pass={number}:stats=x265_2pass.log:log-level=error"]
+            return ["-x265-params", ":".join([f"pass={number}", "stats=x265_2pass.log", "log-level=error", *x265_hdr])]
         return ["-pass", str(number), "-passlogfile", os.path.join(work_dir, "ffmpeg2pass")]
 
     # Both passes encode the same video stream (the first one, as in output_streams)

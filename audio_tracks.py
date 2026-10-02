@@ -105,6 +105,15 @@ class VideoTrackInfo:
     duration: Optional[float] = None
     avg_frame_rate: Optional[str] = None  # ffprobe rational, e.g. '24000/1001'
     r_frame_rate: Optional[str] = None
+    pix_fmt: Optional[str] = None          # e.g. 'yuv420p10le'
+    color_transfer: Optional[str] = None   # 'smpte2084' (PQ: HDR10, Dolby Vision) or 'arib-std-b67' (HLG): HDR
+    color_primaries: Optional[str] = None  # e.g. 'bt2020'
+    color_space: Optional[str] = None      # e.g. 'bt2020nc'
+    dv_profile: Optional[int] = None       # Dolby Vision profile, if any
+
+    @property
+    def is_hdr(self) -> bool:
+        return self.color_transfer in ("smpte2084", "arib-std-b67")
 
 
 @dataclass
@@ -208,7 +217,13 @@ def ffprobe_streams(file_path: str) -> MediaFileInfo:
                 bit_rate=int(stream["bit_rate"]) if stream.get("bit_rate") else None,
                 duration=float(stream["duration"]) if stream.get("duration") else None,
                 avg_frame_rate=stream.get("avg_frame_rate"),
-                r_frame_rate=stream.get("r_frame_rate")
+                r_frame_rate=stream.get("r_frame_rate"),
+                pix_fmt=stream.get("pix_fmt"),
+                color_transfer=stream.get("color_transfer"),
+                color_primaries=stream.get("color_primaries"),
+                color_space=stream.get("color_space"),
+                dv_profile=next((side.get("dv_profile") for side in stream.get("side_data_list", [])
+                                 if "dv_profile" in side), None),
             ))
             
         elif codec_type == "audio":

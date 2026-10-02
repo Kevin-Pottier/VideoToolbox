@@ -101,23 +101,28 @@ SPEED_TEXTS = {
 }
 
 
-def video_height(path):
-    """Height of the video, or None if it cannot be read."""
+def video_info(path):
+    """(height, HDR) of the video, (None, False) if it cannot be read."""
     try:
         media = ffprobe_streams(path)
     except (RuntimeError, OSError):
-        return None
-    return media.video_tracks[0].height if media.video_tracks else None
+        return None, False
+    if not media.video_tracks:
+        return None, False
+    return media.video_tracks[0].height, media.video_tracks[0].is_hdr
 
 
 def ask_compression_settings(encoder, paths):
     """
-    Settings dialog: speed (preset of the encoder), maximum height and audio. Only the heights below the
-    tallest of the videos are offered. Returns a CompressionSettings, or None if the window is closed.
+    Settings dialog: speed (preset of the encoder), maximum height, audio, and what to do with HDR videos
+    (when there is one). Only the heights below the tallest of the videos are offered.
+    Returns a CompressionSettings, or None if the window is closed.
     """
     from tkinter import ttk
-    heights = [h for h in map(video_height, paths) if h]
+    infos = [video_info(path) for path in paths]
+    heights = [height for height, _ in infos if height]
     tallest = max(heights, default=None)
+    any_hdr = any(is_hdr for _, is_hdr in infos)
     root = tk.Tk()
     root.title("Compression settings")
     root.attributes('-topmost', True)
@@ -130,6 +135,7 @@ def ask_compression_settings(encoder, paths):
     audio_codec = tk.StringVar(master=root, value="aac")
     audio_kbps = tk.IntVar(master=root, value=AUDIO_BITRATE // 1000)
     keep_surround = tk.BooleanVar(master=root, value=False)
+    hdr_to_sdr = tk.BooleanVar(master=root, value=False)
     note = {"font": ("Segoe UI", 9, "italic")}
 
     create_styled_label(frame, "Speed / quality", style='Title.TLabel').pack(anchor="w")
@@ -150,6 +156,19 @@ def ask_compression_settings(encoder, paths):
                             style='TRadiobutton').pack(anchor="w", padx=10)
     create_styled_label(frame, "For a small size, a lower resolution gives a sharper picture than a full resolution\n"
                                "starved of bitrate (smaller videos keep their own).", **note).pack(anchor="w", padx=10)
+
+    if any_hdr:
+        create_styled_label(frame, "HDR video", style='Title.TLabel').pack(anchor="w", pady=(10, 0))
+        if encoder.codec == "H.264":
+            create_styled_label(frame, "H.264 cannot keep the HDR: the video is converted to SDR (plays on every "
+                                       "screen).\nChoose an HEVC or AV1 encoder to keep it.", **note).pack(anchor="w", padx=10)
+        else:
+            ttk.Radiobutton(frame, text="Keep the HDR (10 bits, for HDR screens and players)", variable=hdr_to_sdr,
+                            value=False, style='TRadiobutton').pack(anchor="w", padx=10)
+            ttk.Radiobutton(frame, text="Convert to SDR (plays on every screen)", variable=hdr_to_sdr, value=True,
+                            style='TRadiobutton').pack(anchor="w", padx=10)
+            create_styled_label(frame, "With burned subtitles the video is converted to SDR (they would be blinding "
+                                       "in HDR).", **note).pack(anchor="w", padx=10)
 
     create_styled_label(frame, "Audio (every track is kept)", style='Title.TLabel').pack(anchor="w", pady=(10, 0))
     for codec in audio_codecs.available_codecs():
@@ -182,7 +201,7 @@ def ask_compression_settings(encoder, paths):
 
     def ok():
         result["settings"] = CompressionSettings(speed.get(), max_height.get() or None, audio_kbps.get(),
-                                                 keep_surround.get(), audio_codec.get())
+                                                 keep_surround.get(), audio_codec.get(), hdr_to_sdr.get())
         root.quit()
     create_styled_button(frame, "OK", ok, width=12).pack(pady=(12, 0))
     root.protocol("WM_DELETE_WINDOW", root.quit)

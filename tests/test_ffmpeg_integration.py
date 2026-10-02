@@ -562,3 +562,43 @@ def test_compression_with_opus_audio(bilingual_mkv):
     settings = compression.CompressionSettings(audio_codec="opus", audio_kbps=96)
     out = compression.run_compression(bilingual_mkv, "none", None, "mp4", 0.0003, gui_progress=noop, settings=settings)
     assert [s["codec_name"] for s in streams_of_type(out, "audio")] == ["opus", "opus"]
+
+
+@pytest.fixture
+def hdr10_clip(tmp_path):
+    """HDR10 video (HEVC 10-bit, PQ, BT.2020) with its mastering display and content light level metadata."""
+    path = tmp_path / "hdr.mkv"
+    result = subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "testsrc2=size=640x360:rate=24:duration=2",
+                             "-vf", "format=yuv420p10le,setparams=color_primaries=bt2020:color_trc=smpte2084:colorspace=bt2020nc",
+                             "-c:v", "libx265", "-x265-params", "log-level=error:hdr10=1:colorprim=bt2020:transfer=smpte2084:"
+                             "colormatrix=bt2020nc:master-display=G(13250,34500)B(7500,3000)R(34000,16000)WP(15635,16450)"
+                             "L(10000000,50):max-cll=1000,400", str(path)], capture_output=True)
+    if result.returncode != 0:
+        pytest.skip("this FFmpeg build has no 10-bit libx265")
+    return str(path)
+
+
+def video_colors(path):
+    video = streams_of_type(path, "video")[0]
+    return video["codec_name"], video["pix_fmt"], video.get("color_transfer"), video.get("color_primaries")
+
+
+def test_hdr10_kept_by_x265_with_its_metadata(hdr10_clip):
+    import compression
+    import encoders
+    import hdr
+    out = compression.run_compression(hdr10_clip, "none", None, "mkv", os.path.getsize(hdr10_clip) / 2 / 1024 ** 3,
+                                      gui_progress=noop, encoder=encoders.BY_NAME["libx265"])
+    assert video_colors(out) == ("hevc", "yuv420p10le", "smpte2084", "bt2020")
+    assert hdr.read_static_metadata(out) == hdr.read_static_metadata(hdr10_clip)
+
+
+def test_hdr10_converted_to_sdr_for_h264(hdr10_clip):
+    # It used to be an 8-bit H.264 still tagged as HDR: washed-out colors on most screens
+    import compression
+    import hdr
+    if not hdr.has_zscale():
+        pytest.skip("this FFmpeg build has no zscale filter")
+    out = compression.run_compression(hdr10_clip, "none", None, "mkv", os.path.getsize(hdr10_clip) / 2 / 1024 ** 3,
+                                      gui_progress=noop)
+    assert video_colors(out) == ("h264", "yuv420p", "bt709", "bt709")

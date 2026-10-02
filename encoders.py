@@ -74,14 +74,24 @@ def input_args(encoder):
     return ["-vaapi_device", VAAPI_DEVICE] if encoder.hardware == "VAAPI" else []
 
 
-def filter_args(encoder, filters=()):
-    """-vf for the given filters, plus the conversion every encoder accepts (8-bit 4:2:0)."""
+def filter_args(encoder, filters=(), ten_bit=False):
+    """
+    -vf for the given filters, plus the conversion every encoder accepts: 8-bit 4:2:0, or 10-bit 4:2:0
+    to keep an HDR video (HEVC and AV1 encoders, see ten_bit_args).
+    """
     filters = list(filters)
     if encoder.hardware == "VAAPI":
-        filters += ["format=nv12", "hwupload"]  # VAAPI encodes frames that live on the GPU
+        filters += ["format=p010" if ten_bit else "format=nv12", "hwupload"]  # VAAPI encodes frames on the GPU
+    elif ten_bit:
+        filters += ["format=p010le" if encoder.hardware else "format=yuv420p10le"]  # GPU encoders take P010
     else:
         filters += ["format=yuv420p"]  # 10-bit or 4:4:4 sources cannot go to every encoder
     return ["-vf", ",".join(filters)]
+
+
+def ten_bit_args(encoder):
+    """Options of a 10-bit encode: the Main 10 profile of the GPU HEVC encoders (the others choose it)."""
+    return ["-profile:v", "main10"] if encoder.hardware and encoder.codec == "HEVC" else []
 
 
 def _codec_args(encoder):
