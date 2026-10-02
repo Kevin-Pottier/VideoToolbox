@@ -142,7 +142,7 @@ In these runs the output never exceeded the target. A file already under the tar
 ### Repository and tests
 
 - Fresh clone: **74 MB → 0.18 MB** (the Real-ESRGAN binaries and models are downloaded by `scripts/fetch_deps.py` instead of being versioned).
-- 337 automated tests (unit, real FFmpeg on generated videos, and the windows opened and clicked in a virtual display), run by GitHub Actions on Linux (Python 3.9 and 3.13) and Windows: they cover 89 % of the processing code (compression, encoders, audio, subtitles, translation, ffmpeg runner; 74 % before) and 81 % of all the code, windows included (they were not tested before); the end-to-end battery below drives the whole application.
+- 340 automated tests (unit, real FFmpeg on generated videos, and the windows opened and clicked in a virtual display), run by GitHub Actions on Linux (Python 3.9 and 3.13) and Windows: they cover 89 % of the processing code (compression, encoders, audio, subtitles, translation, ffmpeg runner; 74 % before) and 81 % of all the code, windows included (they were not tested before); the end-to-end battery below drives the whole application.
 - End-to-end battery (`tests/e2e/run.py`, see [Development](#development)): 30 scenarios driven through the real windows from the main menu, on real footage: compression (no subtitles, soft, burned, MP4 and MKV, x264/x265/SVT-AV1, settings, constant quality, original audio kept, copy shortcut, batch, invalid and too small sizes, cancellation), translation (single and batch with a stand-in for Google, DeepL and its fallback to Google, which refuses the requests of a cloud machine, invalid file, Google refusing the requests), upscaling with the real Real-ESRGAN (both models, refusal at the disk space question), audio conversion (AAC, Opus 5.1, DivX AVI), add subtitles (soft, burned, DivX AVI, batch) and audio tracks management. It found three of the bugs fixed in October 2026 (see the changelog).
 
 ## Major Changes
@@ -184,34 +184,30 @@ MIT
 
 
 ## Making an .exe (Windows executable)
-You can create a standalone `.exe` for easy sharing and use on Windows:
 
-1. **Install PyInstaller** (if not already installed):
-   ```bash
-   pip install pyinstaller
-   ```
+**Ready-made**: GitHub builds `VideoToolbox.exe` (a single file with Python, the libraries, Real-ESRGAN and its models: about 60 MB) and checks it:
+- for each release, the `.exe` is attached to the release: [Releases](https://github.com/Kevin-Pottier/VideoToolbox/releases/latest). A release is made by pushing a tag: `git tag v1.0.0 && git push origin v1.0.0` (the version is shown in the main menu);
+- for every push to `main`, the `.exe` of that version is an artifact of the "Windows executable" run, in the [Actions](https://github.com/Kevin-Pottier/VideoToolbox/actions/workflows/release.yml) tab (kept 30 days, sign-in needed).
 
+FFmpeg is not inside (installed apart, it gets its updates): if it is missing, the application says so at the start, with the command that installs it (`winget install Gyan.FFmpeg`). Users do not need Python. The console window next to the windows shows the details of the work (ffmpeg commands, errors).
 
-2. **Build the executable** (from the project folder, after `python scripts/fetch_deps.py`):
-   ```bash
-   pyinstaller --onefile --add-data "Tool;Tool" main.py
-   ```
-   - `--onefile`: Bundle everything into a single .exe
-   - Python modules are found automatically from the imports, no need to list them.
-   - `--add-data "Tool;Tool"`: embeds the Real-ESRGAN executable and model used for upscaling.
+`VideoToolbox.exe --check` (or `python main.py --check`) checks an installation: the modules, Real-ESRGAN and its models, FFmpeg and the windows.
 
-3. **Find your .exe** in the `dist` folder as `main.exe`. You can rename it if you wish.
-
-4. **Distribute**: Share the `.exe` file with others. They do not need Python installed.
-
-**Note:**
-- If you see missing module errors, add them with more `--add-data` or check your imports.
+**By hand** (from the project folder, after `python scripts/fetch_deps.py`):
+```bash
+pip install pyinstaller
+pyinstaller --noconfirm --onefile --console --name VideoToolbox --add-data "Tool;Tool" main.py
+dist\VideoToolbox.exe --check
+```
+- `--onefile`: a single .exe (unpacked into a temporary folder at each start, a few seconds);
+- the Python modules are found from the imports; `--add-data "Tool;Tool"` adds Real-ESRGAN and its models (`Tool:Tool` on Linux and macOS).
 
 
 ## Changelog
 
 
 ### October 2026
+- `VideoToolbox.exe` is built and checked by GitHub for every push and attached to each release (tag `v*`); `--check` checks an installation, and a missing FFmpeg is announced at the start with the command that installs it.
 - Compression: a constant quality mode (High, Good, Small), without target size, in one pass: the file gets the size the video needs.
 - Every window belongs to one Tk root (there were up to 17 `tk.Tk()`, each a separate Tcl interpreter), with one progress window for every feature (bar and time left per file; closing it stops the work and removes the partial outputs, which only the upscaling did) and one ffmpeg runner (progress, stuck ffmpeg killed, cancellation) instead of five copies. Fixed on the way: adding subtitles updated its window from the worker thread, and its batch mode said "All videos processed!" when some had failed; the compression of a single video now ends with a message (output and size), and the subtitle translation no longer touches Tk from its threads. The windows are tested by clicking them in a virtual display.
 - Upscaling: the duration is estimated before starting, from the speed of Real-ESRGAN measured on a frame of the video (11 min announced for a clip that took 12), with an advice when the live action model on an HD source would take hours.

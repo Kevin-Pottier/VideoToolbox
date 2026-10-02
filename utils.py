@@ -10,6 +10,23 @@ SUBTITLE_ENCODINGS = ("utf-8-sig", "cp1252", "latin-1")
 # none on their B-frames, and MKV/MP4 refuse such packets ("Can't write packet with unknown timestamp")
 COPY_INPUT_FLAGS = ["-fflags", "+genpts"]
 
+# How to install FFmpeg, by sys.platform (as scripts/fetch_deps.py, which runs without the application)
+FFMPEG_INSTALL_HINTS = {
+    "win32": "winget install Gyan.FFmpeg\n(or https://www.gyan.dev/ffmpeg/builds/, then add its bin folder to the PATH)",
+    "darwin": "brew install ffmpeg",
+}
+
+
+def missing_ffmpeg_tools():
+    """'ffmpeg' and/or 'ffprobe' when they are not in the PATH."""
+    import shutil
+    return [tool for tool in ("ffmpeg", "ffprobe") if shutil.which(tool) is None]
+
+
+def ffmpeg_install_hint():
+    import sys
+    return FFMPEG_INSTALL_HINTS.get(sys.platform, "sudo apt install ffmpeg (or your package manager)")
+
 
 @functools.lru_cache(maxsize=None)
 def fps_mode_option():

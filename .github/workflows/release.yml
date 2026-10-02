@@ -1,0 +1,51 @@
+name: Windows executable
+
+# Builds VideoToolbox.exe with PyInstaller (Python, the libraries, Real-ESRGAN and its models inside; FFmpeg is
+# installed apart) and checks it with --check:
+# - on every push to main, and on demand (Actions tab, "Run workflow"): the .exe is an artifact of the run;
+# - on a tag v* (git tag v1.0.0 && git push origin v1.0.0): the .exe is attached to the GitHub release of the tag.
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write  # to create the release of a tag
+
+jobs:
+  exe:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: requirements*.txt
+      - name: Install FFmpeg (for the check of the .exe only, it is not inside)
+        run: choco install ffmpeg --no-progress -y
+      - run: pip install -r requirements.txt pyinstaller
+      - name: Download Real-ESRGAN and its models (SHA-256 checked)
+        run: python scripts/fetch_deps.py
+      - name: Version of a release (the tag), shown in the main menu
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        run: echo "VERSION = \"${GITHUB_REF_NAME}\"" > version.py
+      - name: Build
+        run: pyinstaller --noconfirm --onefile --console --name VideoToolbox --add-data "Tool;Tool" main.py
+      - name: Check the executable (modules, Real-ESRGAN, FFmpeg, windows)
+        shell: bash
+        run: ./dist/VideoToolbox.exe --check
+      - uses: actions/upload-artifact@v4
+        with:
+          name: VideoToolbox-windows
+          path: dist/VideoToolbox.exe
+          retention-days: 30
+      - name: Attach the .exe to the release of the tag
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/VideoToolbox.exe
+          generate_release_notes: true
