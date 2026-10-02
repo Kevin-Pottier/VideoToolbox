@@ -43,8 +43,8 @@ def movie_mkv(tmp_path):
     return str(path)
 
 
-def test_audio_fix_keeps_every_track_with_french_first(tmp_path):
-    from audio_fix import run_audio_fix
+def test_audio_conversion_keeps_every_track_with_french_first(tmp_path):
+    from audio_conversion import run_audio_conversion
     (tmp_path / "fr.srt").write_text(FRENCH_SRT, encoding="utf-8")
     src = tmp_path / "multi.mkv"
     run_ffmpeg(*lavfi_video(), *(arg for f in (440, 500, 600, 700, 800) for arg in lavfi_audio(frequency=f)),
@@ -60,9 +60,9 @@ def test_audio_fix_keeps_every_track_with_french_first(tmp_path):
                "-disposition:a:3", "0", "-disposition:a:4", "visual_impaired",
                str(src))
 
-    order = run_audio_fix(str(src), gui_progress=noop)
+    out, order = run_audio_conversion(str(src), gui_progress=noop)
 
-    out = tmp_path / "multi_fixed.mkv"
+    assert out == str(tmp_path / "multi_aac.mkv")
     audio = streams_of_type(out, "audio")
     assert order == ["FRE 1ch (VFF)", "? 1ch (VFQ 2.0)", "FRE 1ch (Audiodescription)", "ENG 6ch (VO)", "GER 1ch"]
     assert [s.get("tags", {}).get("title") for s in audio] == ["VFF", "VFQ 2.0", "Audiodescription", "VO", None]
@@ -478,3 +478,53 @@ def test_a_small_file_reduced_in_resolution_is_encoded_but_not_bigger(hd_surroun
     assert streams_of_type(out, "video")[0]["height"] == 480
     assert streams_of_type(out, "audio")[0]["channels"] == 2  # stereo by default
     assert os.path.getsize(out) <= os.path.getsize(hd_surround) * 1.1
+
+
+def requires_audio_encoder(name):
+    import audio_codecs
+    if audio_codecs.BY_NAME[name].encoder not in audio_codecs._built_audio_encoders():
+        pytest.skip(f"the {name} encoder is not in this FFmpeg build")
+
+
+@pytest.mark.parametrize("codec, source_layout, channels, layout", [
+    ("opus", "5.1(side)", 6, "5.1"),  # libopus refuses 5.1(side): converted to 5.1
+    ("ac3", "7.1", 6, "5.1(side)"),   # AC3 takes 5.1 at most: down-mixed with its LFE (not 5.0)
+    ("aac", "7.1", 8, "7.1"),
+])
+def test_audio_conversion_keeps_the_surround(tmp_path, codec, source_layout, channels, layout):
+    from audio_codecs import AudioSettings
+    from audio_conversion import run_audio_conversion
+    requires_audio_encoder(codec)
+    src = tmp_path / "surround.mkv"
+    run_ffmpeg(*lavfi_video(), "-f", "lavfi", "-i", f"anoisesrc=d=1:amplitude=0.1,aformat=channel_layouts={source_layout}",
+               "-c:v", "libx264", "-c:a", "flac", str(src))
+
+    out, _ = run_audio_conversion(str(src), AudioSettings(codec, 128, keep_surround=True), gui_progress=noop)
+
+    [audio] = streams_of_type(out, "audio")
+    assert (audio["codec_name"], audio["channels"], audio["channel_layout"]) == (codec, channels, layout)
+    assert stream_md5(out, "0:v") == stream_md5(src, "0:v")  # the video is copied
+
+
+def test_audio_conversion_of_an_mp4_to_flac_goes_to_mkv_with_its_subtitles(tmp_path):
+    from audio_codecs import AudioSettings
+    from audio_conversion import run_audio_conversion
+    (tmp_path / "en.srt").write_text("1\n00:00:00,000 --> 00:00:01,000\nHello\n", encoding="utf-8")
+    src = tmp_path / "film.mp4"
+    run_ffmpeg(*lavfi_video(), *lavfi_audio(), "-i", str(tmp_path / "en.srt"), "-map", "0", "-map", "1", "-map", "2",
+               "-c:v", "libx264", "-c:a", "aac", "-c:s", "mov_text", str(src))
+
+    out, _ = run_audio_conversion(str(src), AudioSettings("flac"), gui_progress=noop)
+
+    assert out == str(tmp_path / "film_flac.mkv")
+    assert [s["codec_name"] for s in streams_of_type(out, "audio")] == ["flac"]
+    assert "Hello" in subtitle_text(out, 0)  # mov_text cannot be copied into MKV: converted to SRT
+
+
+def test_audio_conversion_of_a_divx_avi_with_ac3(xvid_avi):
+    # The case of the Megamind trailer: AC3 in a DivX AVI, to AAC in MKV, the video copied
+    from audio_conversion import run_audio_conversion
+    out, _ = run_audio_conversion(xvid_avi, gui_progress=noop)
+    assert out.endswith("divx_aac.mkv")
+    assert [s["codec_name"] for s in streams_of_type(out, "audio")] == ["aac"]
+    assert stream_md5(out, "0:v") == stream_md5(xvid_avi, "0:v")

@@ -80,9 +80,13 @@ SCENARIOS = {
     "upscale-refused-at-the-disk-space-question": dict(inputs=["megamind_small.mkv"], videos=["megamind_small.mkv"],
         outdir="out", upscale=True, refuse=["Temporary disk space", "Not enough disk space"],
         plan=menu("Upscale video", ["1080p"], ["Animation", "OK"], [X264, "OK"])),
-    # ---- Audio fix (stereo down-mix, French first)
-    "audio-fix": dict(inputs=["film.mkv"], videos=["film.mkv"],
-        plan=menu("Audio fix for stereo", ["Add Files", "Convert", "wait:Finished"])),
+    # ---- Audio conversion (the video copied, French first)
+    "audio-conversion-default": dict(inputs=["film.mkv"], videos=["film.mkv"],
+        plan=menu("Audio conversion", ["Add Files", "Convert", "wait:Finished"])),
+    "audio-conversion-opus-surround": dict(inputs=["film.mkv"], videos=["film.mkv"],
+        plan=menu("Audio conversion", ["Opus", "128 kbps", "Keep the channels", "Add Files", "Convert", "wait:Finished"])),
+    "audio-conversion-divx-ac3-to-aac": dict(inputs=["megamind.avi"], videos=["megamind.avi"],
+        plan=menu("Audio conversion", ["Add Files", "Convert", "wait:Finished"])),
     # ---- Add subtitles
     "add-subtitles-soft": dict(inputs=["film.mkv", "film.en.srt"], videos=["film.mkv"], subtitles=["film.en.srt"],
         plan=menu("Add subtitles", SUB_SOFT)),
@@ -291,12 +295,24 @@ def check(name, sc, d, result, new):
                 f"{frames(out)} = {frames(src)} + {offset}")
             add("audio kept", len(streams(out, "audio")) == len(streams(src, "audio")))
             add("no temporary file left", len([f for f in new if f.startswith("out")]) == 1, str(new))
-    elif name == "audio-fix":
+    elif name.startswith("audio-conversion"):
         no_errors()
-        out = output(r"film_fixed\.mkv$")
+        codec = "opus" if "opus" in name else "aac"
+        out = output(rf"_{codec}\.mkv$")
         if out:
-            add("French first, stereo", audio_layout(out) == [("fre", 2, 1), ("eng", 2, 0)], str(audio_layout(out)))
-            add("video and subtitles kept", len(streams(out, "video")) == 1 and len(streams(out, "subtitle")) == 1)
+            add(f"audio in {codec}", {s["codec_name"] for s in streams(out, "audio")} == {codec},
+                str([s["codec_name"] for s in streams(out, "audio")]))
+            add("video copied", frames(out) == frames(src) and streams(out, "video")[0]["codec_name"]
+                == streams(src, "video")[0]["codec_name"])
+            if name != "audio-conversion-divx-ac3-to-aac":
+                wanted = [("fre", 6, 1), ("eng", 2, 0)] if "surround" in name else [("fre", 2, 1), ("eng", 2, 0)]
+                add("French first, channels", audio_layout(out) == wanted, str(audio_layout(out)))
+                add("subtitles kept", len(streams(out, "subtitle")) == 1)
+            if "opus" in name:
+                # The requested bitrates: Opus is VBR, and codes the synthetic noise of the test far below its target
+                # (on real movie audio: 238 kbps for 256, 109 for 128)
+                log = open(os.path.join(d, "log.txt"), encoding="utf-8", errors="replace").read()
+                add("bitrate 128 kbps per stereo track, twice for 5.1", "-b:a:0 256k -b:a:1 128k" in log, "see log.txt")
     elif name.startswith("add-subtitles"):
         no_errors()
         if name in ("add-subtitles-soft", "add-subtitles-batch", "add-subtitles-avi"):
