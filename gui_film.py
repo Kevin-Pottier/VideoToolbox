@@ -2,10 +2,11 @@ import tkinter as tk
 from tkinter import filedialog, simpledialog, messagebox, ttk
 from colorama import Fore, Style
 import os
+import audio_codecs
 import encoders
 from audio_tracks import ffprobe_streams
-from compression import (AUDIO_BITRATE, AUDIO_KBPS_CHOICES, MAX_HEIGHT_CHOICES, CompressionError, CompressionSettings,
-                         run_compression)
+from compression import (AUDIO_BITRATE, AUDIO_CODECS, AUDIO_KBPS_CHOICES, COPY_AUDIO, MAX_HEIGHT_CHOICES,
+                         CompressionError, CompressionSettings, run_compression)
 from gui_helpers import (apply_modern_theme, choose_encoder, create_styled_button, create_styled_frame,
                          create_styled_label, show_message)
 
@@ -126,6 +127,7 @@ def ask_compression_settings(encoder, paths):
     frame.pack(fill="both", expand=True, padx=14, pady=10)
     speed = tk.StringVar(master=root, value="balanced")
     max_height = tk.IntVar(master=root, value=0)  # 0: the resolution is kept
+    audio_codec = tk.StringVar(master=root, value="aac")
     audio_kbps = tk.IntVar(master=root, value=AUDIO_BITRATE // 1000)
     keep_surround = tk.BooleanVar(master=root, value=False)
     note = {"font": ("Segoe UI", 9, "italic")}
@@ -150,21 +152,37 @@ def ask_compression_settings(encoder, paths):
                                "starved of bitrate (smaller videos keep their own).", **note).pack(anchor="w", padx=10)
 
     create_styled_label(frame, "Audio (every track is kept)", style='Title.TLabel').pack(anchor="w", pady=(10, 0))
+    for codec in audio_codecs.available_codecs():
+        if codec.name in AUDIO_CODECS:
+            ttk.Radiobutton(frame, text=codec.label, variable=audio_codec, value=codec.name,
+                            style='TRadiobutton').pack(anchor="w", padx=10)
+    ttk.Radiobutton(frame, text="Keep the original audio (copied without loss, its real size is counted)",
+                    variable=audio_codec, value=COPY_AUDIO, style='TRadiobutton').pack(anchor="w", padx=10)
     row = create_styled_frame(frame)
-    row.pack(anchor="w", padx=10)
+    row.pack(anchor="w", padx=10, pady=(4, 0))
+    encoding_widgets = []
     for kbps in AUDIO_KBPS_CHOICES:
-        ttk.Radiobutton(row, text=f"{kbps} kbps", variable=audio_kbps, value=kbps, style='TRadiobutton').pack(
-            side="left", padx=(0, 8))
-    ttk.Checkbutton(frame, text="Keep the 5.1 / 7.1 surround (twice the bitrate for those tracks), instead of stereo",
-                    variable=keep_surround, style='TCheckbutton').pack(anchor="w", padx=10, pady=(4, 0))
-    create_styled_label(frame, "Bitrate per stereo track: 128 kbps is good, 192 kbps very good.", **note).pack(
-        anchor="w", padx=10)
+        button = ttk.Radiobutton(row, text=f"{kbps} kbps", variable=audio_kbps, value=kbps, style='TRadiobutton')
+        button.pack(side="left", padx=(0, 8))
+        encoding_widgets.append(button)
+    surround = ttk.Checkbutton(frame, text="Keep the 5.1 / 7.1 surround (twice the bitrate for those tracks), "
+                                           "instead of stereo", variable=keep_surround, style='TCheckbutton')
+    surround.pack(anchor="w", padx=10, pady=(4, 0))
+    encoding_widgets.append(surround)
+    create_styled_label(frame, "Bitrate per stereo track: AAC 128 kbps is good, 192 kbps very good; Opus needs a third "
+                               "less.", **note).pack(anchor="w", padx=10)
+
+    def update_audio(*_args):
+        # The original audio is copied: no bitrate, no channel choice
+        for widget in encoding_widgets:
+            widget.state(["disabled"] if audio_codec.get() == COPY_AUDIO else ["!disabled"])
+    audio_codec.trace_add("write", update_audio)
 
     result = {}
 
     def ok():
         result["settings"] = CompressionSettings(speed.get(), max_height.get() or None, audio_kbps.get(),
-                                                 keep_surround.get())
+                                                 keep_surround.get(), audio_codec.get())
         root.quit()
     create_styled_button(frame, "OK", ok, width=12).pack(pady=(12, 0))
     root.protocol("WM_DELETE_WINDOW", root.quit)

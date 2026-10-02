@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from typing import Optional
 from colorama import Fore, Style
 from audio_tracks import MP4_CONVERTIBLE_SUBTITLE_CODECS, ffprobe_streams, french_default_dispositions, french_first
+import audio_codecs
 import encoders
 from utils import COPY_INPUT_FLAGS, fps_mode_option, prepare_subtitle_file
 import subprocess
@@ -22,6 +23,12 @@ from gui_helpers import apply_modern_theme, create_styled_frame, create_styled_l
 
 AUDIO_BITRATE = 192000  # default bps of an audio track: used in the ffmpeg command and in the size budget
 AUDIO_KBPS_CHOICES = (96, 128, 160, 192, 256)  # offered per (stereo) audio track
+# Audio codecs offered by the compression (FLAC, lossless, has no predictable size), or "copy": the original
+# audio kept as it is, its real bitrate counted in the size
+AUDIO_CODECS = ("aac", "opus", "ac3", "eac3")
+COPY_AUDIO = "copy"
+# Audio codecs that MP4 can store as they are (DTS, TrueHD, PCM... need MKV)
+MP4_AUDIO_CODECS = {"aac", "ac3", "eac3", "mp3", "mp2", "opus", "flac", "alac"}
 MAX_HEIGHT_CHOICES = (1080, 720, 480)  # offered output heights (a smaller video keeps its own)
 SIZE_MARGIN = 0.02  # share of the target size kept for the container overhead and the encoder deviation
 MIN_VIDEO_BITRATE_KBPS = 100
@@ -42,21 +49,56 @@ class CompressionSettings:
     max_height: Optional[int] = None  # a taller video is reduced to this height (the width follows)
     audio_kbps: int = AUDIO_BITRATE // 1000  # per stereo or mono track
     keep_surround: bool = False       # keep 5.1/7.1 tracks (at twice the bitrate) instead of the stereo down-mix
+    audio_codec: str = "aac"          # AUDIO_CODECS, or COPY_AUDIO to keep the original audio
+
+    def audio(self):
+        """The audio choices for audio_codecs (not for COPY_AUDIO)."""
+        return audio_codecs.AudioSettings(self.audio_codec, self.audio_kbps, self.keep_surround)
 
     def describe(self, encoder):
         level = encoders.preset(encoder, self.speed)
+        if self.audio_codec == COPY_AUDIO:
+            audio = "original audio copied"
+        else:
+            audio = (f"audio {self.audio_codec.upper()} {self.audio_kbps} kbps per track"
+                     + (", surround kept" if self.keep_surround else ", stereo"))
         return (f"speed {self.speed}" + (f" (preset {level})" if level else "")
-                + (f", {self.max_height}p at most" if self.max_height else "")
-                + f", audio {self.audio_kbps} kbps per track" + (", surround kept" if self.keep_surround else ", stereo"))
+                + (f", {self.max_height}p at most" if self.max_height else "") + f", {audio}")
 
 
 DEFAULT_SETTINGS = CompressionSettings()
 
 
 def audio_bitrates(media, settings=DEFAULT_SETTINGS):
-    """Bitrate (bps) of each audio track of the output, in the output order (French tracks first)."""
-    return [settings.audio_kbps * 1000 * (2 if settings.keep_surround and (track.channels or 2) > 2 else 1)
-            for track in french_first(media.audio_tracks)]
+    """
+    Bitrate (bps) of each audio track of the output, in the output order (French tracks first). For the
+    original audio, the bitrate of the source tracks when the container gives it (see source_audio_bitrates).
+    """
+    tracks = french_first(media.audio_tracks)
+    if settings.audio_codec == COPY_AUDIO:
+        return [track.bit_rate or 0 for track in tracks]
+    return audio_codecs.bitrates(tracks, settings.audio())
+
+
+def source_audio_bitrates(file_path, media):
+    """
+    Bitrate (bps) of the audio tracks of the source, in the output order: given by ffprobe, or measured from
+    the size of their packets when the container does not give it (MKV): one reading of the file.
+    """
+    tracks = french_first(media.audio_tracks)
+    measured = {}
+    if any(not track.bit_rate for track in tracks) and media.duration:
+        print("Measuring the bitrate of the original audio tracks...")
+        out = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "a", "-show_entries",
+                              "packet=stream_index,size", "-of", "csv=p=0", file_path],
+                             capture_output=True, encoding="utf-8", errors="replace").stdout
+        sizes = collections.Counter()
+        for line in out.splitlines():
+            fields = line.split(",")
+            if len(fields) >= 2 and fields[0].isdigit() and fields[1].isdigit():
+                sizes[int(fields[0])] += int(fields[1])
+        measured = {index: int(size * 8 / media.duration) for index, size in sizes.items()}
+    return [track.bit_rate or measured.get(track.stream_index, 0) for track in tracks]
 
 
 def scaled_height(media, settings=DEFAULT_SETTINGS):
@@ -104,10 +146,18 @@ def run_compression(file_path, sub_option, sub_file, ext, max_size_gb, gui_progr
     if not duration or duration <= 0:
         raise CompressionError(f"Could not determine the duration of {os.path.basename(file_path)}.")
 
-    # Every audio track is kept and re-encoded at the chosen bitrate: the budget depends on the number
-    # of tracks, not on the source bitrate
-    audio_bps = sum(audio_bitrates(media, settings))
+    # Every audio track is kept and re-encoded at the chosen bitrate (the budget depends on the number of
+    # tracks, not on the source bitrate), or copied (the budget counts its real bitrate)
     n_audio_out = len(media.audio_tracks)
+    if settings.audio_codec == COPY_AUDIO:
+        if ext == "mp4":
+            refused = sorted({track.codec for track in media.audio_tracks if track.codec not in MP4_AUDIO_CODECS})
+            if refused:
+                raise CompressionError(f"The {', '.join(c.upper() for c in refused)} audio cannot be copied into MP4: "
+                                       "choose MKV, or an audio codec in the settings.")
+        audio_bps = sum(source_audio_bitrates(file_path, media))
+    else:
+        audio_bps = sum(audio_bitrates(media, settings))
 
     print(f"Duration: {duration:.2f} s")
     print(f"Settings: {settings.describe(encoder)}")
@@ -223,15 +273,10 @@ def output_streams(media, ext, added_subtitle):
 
 
 def audio_args(media, settings=DEFAULT_SETTINGS):
-    """Audio codec arguments: AAC at the chosen bitrate, down-mixed to stereo unless the surround is kept."""
-    args = ["-c:a", "aac", "-ar", "48000"]
-    if not settings.keep_surround:
-        return args + ["-ac", "2", "-b:a", f"{settings.audio_kbps}k"]
-    # Standard layouts: the 5.1(side) of DTS/AC3 tracks would be an unknown layout in AAC
-    args += ["-af", "aformat=channel_layouts=mono|stereo|5.1|7.1"]
-    for index, bps in enumerate(audio_bitrates(media, settings)):
-        args += [f"-b:a:{index}", f"{bps // 1000}k"]
-    return args
+    """Audio arguments: the chosen codec and bitrate, stereo or surround kept (see audio_codecs), or a copy."""
+    if settings.audio_codec == COPY_AUDIO:
+        return ["-c:a", "copy"]
+    return audio_codecs.encode_args(french_first(media.audio_tracks), settings.audio())
 
 
 def build_encode_commands(input_path, output_path, ext, video_bitrate_kbps, sub_option, sub_path, work_dir, media,

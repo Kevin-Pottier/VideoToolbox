@@ -51,6 +51,8 @@ SCENARIOS = {
         plan=menu("Video Compression", ["OK"], ["MKV"], ["encoder:HEVC GPU", "OK"], SETTINGS)),
     "compress-settings-720p-fast-128k-surround": dict(inputs=["film.mkv"], videos=["film.mkv"], size="0.008",
         plan=menu("Video Compression", ["OK"], ["MKV"], [X264, "OK"], ["Fast", "720p", "128 kbps", "Keep the 5.1", "OK"])),
+    "compress-keep-original-audio": dict(inputs=["film.mkv"], videos=["film.mkv"], size="0.008",
+        plan=menu("Video Compression", ["OK"], ["MKV"], [X264, "OK"], ["Keep the original audio", "OK"])),
     "compress-copy-shortcut": dict(inputs=["film.mkv"], videos=["film.mkv"], size="1",
         plan=menu("Video Compression", ["OK"], ["MKV"], [X264, "OK"], SETTINGS)),
     "compress-avi-copy-shortcut": dict(inputs=["megamind.avi"], videos=["megamind.avi"], size="1",
@@ -132,6 +134,11 @@ def frames(path):
     out = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-count_packets", "-show_entries",
                           "stream=nb_read_packets", "-of", "csv=p=0", path], capture_output=True, encoding="utf-8").stdout
     return int(out.strip().split(",")[0])
+
+
+def stream_md5(path, spec):
+    return subprocess.run(["ffmpeg", "-v", "error", "-i", path, "-map", spec, "-c", "copy", "-f", "md5", "-"],
+                          capture_output=True, encoding="utf-8").stdout.strip()
 
 
 def subtitle_texts(path):
@@ -220,8 +227,20 @@ def check(name, sc, d, result, new):
             add("size <= target", ratio <= 1.0, f"{ratio:.3f} of the target")
             add("size >= 85 % of the target", ratio >= 0.85, f"{ratio:.3f} of the target")
             log = open(os.path.join(d, "log.txt"), encoding="utf-8", errors="replace").read()
-            add("settings applied", "speed fast (preset veryfast), 720p at most, audio 128 kbps per track, surround kept"
+            add("settings applied", "speed fast (preset veryfast), 720p at most, audio AAC 128 kbps per track, surround kept"
                 in log, "see log.txt")
+    elif name == "compress-keep-original-audio":
+        no_errors()
+        out = output(r"film_compressed\.mkv$")
+        if out:
+            # The French 5.1 (second in the source) first, both tracks copied bit for bit
+            add("French 5.1 first, English stereo", audio_layout(out) == [("fre", 6, 1), ("eng", 2, 0)],
+                str(audio_layout(out)))
+            add("audio copied, not re-encoded", stream_md5(out, "0:a:0") == stream_md5(src, "0:a:1")
+                and stream_md5(out, "0:a:1") == stream_md5(src, "0:a:0"))
+            ratio = os.path.getsize(out) / (float(sc["size"]) * GIB)
+            add("size <= target (the real audio size counted)", ratio <= 1.0, f"{ratio:.3f} of the target")
+            add("size >= 85 % of the target", ratio >= 0.85, f"{ratio:.3f} of the target")
     elif name == "compress-avi-copy-shortcut":
         no_errors()
         out = output(r"megamind_compressed\.mkv$")

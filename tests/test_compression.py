@@ -96,7 +96,7 @@ def test_mov_text_subtitles_become_srt_in_mkv():
 def test_first_pass_only_analyses_the_video():
     (pass1, share1), (pass2, share2) = two_pass()
     assert option(pass1, "-pass") == "1" and "-an" in pass1 and pass1[-3:] == ["-f", "null", "-"]
-    assert option(pass2, "-pass") == "2" and option(pass2, "-b:a") == "192k" and pass2[-1] == "out.mp4"
+    assert option(pass2, "-pass") == "2" and option(pass2, "-b:a:0") == "192k" and pass2[-1] == "out.mp4"
     assert 0 < share1 < share2 and share1 + share2 == 1
 
 
@@ -135,7 +135,8 @@ def test_a_stuck_ffmpeg_is_killed(monkeypatch):
 def test_default_settings_keep_the_former_commands():
     pass2 = two_pass()[1][0]
     assert option(pass2, "-preset") == "medium" and option(pass2, "-vf") == "format=yuv420p"
-    assert option(pass2, "-ac") == "2" and option(pass2, "-b:a") == "192k" and "-af" not in pass2
+    assert option(pass2, "-c:a") == "aac" and option(pass2, "-ac") == "2" and "-af" not in pass2
+    assert (option(pass2, "-b:a:0"), option(pass2, "-b:a:1")) == ("192k", "192k")
 
 
 def test_the_speed_sets_the_preset_of_both_passes():
@@ -155,13 +156,30 @@ def test_a_taller_video_is_reduced_in_both_passes_then_the_subtitles_are_burned(
 def test_audio_bitrate_and_surround():
     from compression import audio_bitrates
     stereo = two_pass(settings=CompressionSettings(audio_kbps=128))[1][0]
-    assert option(stereo, "-b:a") == "128k" and option(stereo, "-ac") == "2"
+    assert option(stereo, "-b:a:0") == "128k" and option(stereo, "-ac") == "2"
     surround = two_pass(settings=CompressionSettings(audio_kbps=128, keep_surround=True))[1][0]
     assert "-ac" not in surround and option(surround, "-af") == "aformat=channel_layouts=mono|stereo|5.1|7.1"
     # Output order: the French 5.1 first, at twice the bitrate, then the English stereo
     assert (option(surround, "-b:a:0"), option(surround, "-b:a:1")) == ("256k", "128k")
     assert audio_bitrates(FILM, CompressionSettings(audio_kbps=128, keep_surround=True)) == [256000, 128000]
     assert audio_bitrates(FILM) == [192000, 192000]
+
+
+@pytest.mark.parametrize("codec, encoder", [("opus", "libopus"), ("ac3", "ac3"), ("eac3", "eac3")])
+def test_other_audio_codecs(codec, encoder):
+    pass2 = two_pass(settings=CompressionSettings(audio_codec=codec, audio_kbps=128))[1][0]
+    assert option(pass2, "-c:a") == encoder and option(pass2, "-b:a:0") == "128k"
+
+
+def test_the_original_audio_is_copied_and_counted_at_its_bitrate():
+    from compression import audio_bitrates
+    settings = CompressionSettings(audio_codec="copy", audio_kbps=96, keep_surround=True)
+    pass2 = two_pass(settings=settings)[1][0]
+    assert option(pass2, "-c:a") == "copy"
+    assert not [arg for arg in pass2 if arg.startswith("-b:a") or arg in ("-ac", "-af", "-ar")]
+    film = MediaFileInfo("in.mkv", audio_tracks=[AudioTrackInfo(1, "eng", bit_rate=640000),
+                                                 AudioTrackInfo(2, "fre", bit_rate=448000)])
+    assert audio_bitrates(film, settings) == [448000, 640000]  # French first
 
 
 def test_x265_two_passes_share_a_relative_statistics_file():

@@ -528,3 +528,37 @@ def test_audio_conversion_of_a_divx_avi_with_ac3(xvid_avi):
     assert out.endswith("divx_aac.mkv")
     assert [s["codec_name"] for s in streams_of_type(out, "audio")] == ["aac"]
     assert stream_md5(out, "0:v") == stream_md5(xvid_avi, "0:v")
+
+
+def test_compression_keeps_the_original_audio_and_counts_its_real_size(bilingual_mkv, monkeypatch):
+    # MKV gives no bitrate for its tracks: it is measured from their packets (two AAC tracks of about 70 kbps)
+    import compression
+    budgets = []
+    compute = compression.compute_video_bitrate_kbps
+    monkeypatch.setattr(compression, "compute_video_bitrate_kbps",
+                        lambda size, duration, audio_bps, margin: budgets.append(audio_bps) or compute(size, duration,
+                                                                                                    audio_bps, margin))
+    settings = compression.CompressionSettings(audio_codec="copy")
+    out = compression.run_compression(bilingual_mkv, "none", None, "mkv", 0.0003, gui_progress=noop, settings=settings)
+
+    for index in (0, 1):  # French first: the tracks are swapped, not re-encoded
+        assert stream_md5(out, f"0:a:{index}") == stream_md5(bilingual_mkv, f"0:a:{1 - index}")
+    assert 120_000 < budgets[0] < 160_000
+
+
+def test_audio_that_mp4_cannot_store_is_refused_before_encoding(tmp_path):
+    import compression
+    src = tmp_path / "dts.mkv"
+    run_ffmpeg(*lavfi_video(), *lavfi_audio(), "-c:v", "libx264", "-c:a", "dca", "-strict", "-2", str(src))
+    with pytest.raises(compression.CompressionError, match="DTS audio cannot be copied into MP4"):
+        compression.run_compression(str(src), "none", None, "mp4", 0.001, gui_progress=noop,
+                                    settings=compression.CompressionSettings(audio_codec="copy"))
+    assert not os.path.exists(tmp_path / "dts_compressed.mp4")
+
+
+def test_compression_with_opus_audio(bilingual_mkv):
+    import compression
+    requires_audio_encoder("opus")
+    settings = compression.CompressionSettings(audio_codec="opus", audio_kbps=96)
+    out = compression.run_compression(bilingual_mkv, "none", None, "mp4", 0.0003, gui_progress=noop, settings=settings)
+    assert [s["codec_name"] for s in streams_of_type(out, "audio")] == ["opus", "opus"]
